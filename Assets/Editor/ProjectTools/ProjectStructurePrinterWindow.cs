@@ -10,27 +10,10 @@ namespace Editor.ProjectTools
 {
     public class ProjectStructurePrinterWindow : EditorWindow
     {
-        [Serializable]
-        private class Settings
-        {
-            public int maxDepth = 20;
-            public bool includeFiles = true;
-            public bool includeHidden = false;
-            public bool showFileSize = false;
-            public bool useUnicodeTree = true;          // 使用 ├── / └──
-            public bool sortFoldersFirst = true;
-            public bool alphabetical = true;
-            public bool incremental = false;            // 大项目时防止主线程长时间卡顿
-            public bool collapseSingleChild = false;    // 如 A/OnlyDir/Leaf.cs -> A/OnlyDir/Leaf.cs 合并（目录链折叠）
-            public long minFileSizeBytes = 0;            // 过滤过小文件（0=不过滤）
-            public string fileExtensionsFilter = "";     // 例如: ".cs,.shader,.png" 为空表示全部
-            public string ignoreNamePatterns = "obj,bin,temp,.DS_Store,Thumbs.db";
-            public string ignorePathContains = "Packages~,__backup__,~$";
-            public bool ignoreMeta = true;
-            public bool trimTrailingSpaces = true;
-        }
+        // 使用 ScriptableObject 持久化
+        private ProjectStructurePrinterSettings _settingsAsset;
+        private ProjectStructurePrinterSettings.SettingsData S => _settingsAsset.Data;
 
-        private Settings _settings = new Settings();
         private Vector2 _scroll;
         private string _output = "";
         private string _status = "";
@@ -62,15 +45,41 @@ namespace Editor.ProjectTools
             GetWindow<ProjectStructurePrinterWindow>("Project Structure");
         }
 
+        [MenuItem("Tools/Project/Create Project Structure Settings Asset")]
+        public static void CreateSettingsAsset()
+        {
+            var asset = ProjectStructurePrinterSettings.LoadOrCreate();
+            Selection.activeObject = asset;
+            EditorGUIUtility.PingObject(asset);
+        }
+
+        private void OnEnable()
+        {
+            _settingsAsset = ProjectStructurePrinterSettings.LoadOrCreate();
+        }
+
         private void OnGUI()
         {
+            if (_settingsAsset == null)
+            {
+                EditorGUILayout.HelpBox("未找到配置资产，点击下方按钮创建。", MessageType.Warning);
+                if (GUILayout.Button("创建配置资产"))
+                {
+                    _settingsAsset = ProjectStructurePrinterSettings.LoadOrCreate();
+                }
+                return;
+            }
+
             EditorGUILayout.LabelField("项目结构打印器", EditorStyles.boldLabel);
+
             DrawSettings();
 
             using (new EditorGUILayout.HorizontalScope())
             {
+                GUI.enabled = !_isRunningIncremental;
                 if (GUILayout.Button("生成", GUILayout.Height(28)))
                     StartGenerate();
+                GUI.enabled = true;
 
                 if (GUILayout.Button("复制到剪贴板", GUILayout.Height(28)))
                 {
@@ -104,25 +113,56 @@ namespace Editor.ProjectTools
         private void DrawSettings()
         {
             EditorGUILayout.BeginVertical("box");
-            EditorGUILayout.LabelField("遍历设置", EditorStyles.boldLabel);
-            _settings.maxDepth = EditorGUILayout.IntField("最大深度", _settings.maxDepth);
-            _settings.includeFiles = EditorGUILayout.Toggle("包含文件", _settings.includeFiles);
-            _settings.includeHidden = EditorGUILayout.Toggle("包含隐藏(.开头)", _settings.includeHidden);
-            _settings.showFileSize = EditorGUILayout.Toggle("显示文件大小", _settings.showFileSize);
-            _settings.minFileSizeBytes = EditorGUILayout.LongField("最小文件大小(B)", _settings.minFileSizeBytes);
-            _settings.useUnicodeTree = EditorGUILayout.Toggle("使用 Unicode 树形符号", _settings.useUnicodeTree);
-            _settings.sortFoldersFirst = EditorGUILayout.Toggle("文件夹优先排序", _settings.sortFoldersFirst);
-            _settings.alphabetical = EditorGUILayout.Toggle("按名称字母排序", _settings.alphabetical);
-            _settings.incremental = EditorGUILayout.Toggle(new GUIContent("增量模式", "用于超大项目避免一次性卡顿"), _settings.incremental);
-            _settings.collapseSingleChild = EditorGUILayout.Toggle("折叠单子目录链", _settings.collapseSingleChild);
-            _settings.ignoreMeta = EditorGUILayout.Toggle("忽略 .meta 文件", _settings.ignoreMeta);
-            _settings.trimTrailingSpaces = EditorGUILayout.Toggle("去除行尾空格", _settings.trimTrailingSpaces);
+            EditorGUILayout.LabelField("遍历设置 (持久化于 ScriptableObject)", EditorStyles.boldLabel);
+
+            EditorGUI.BeginChangeCheck();
+
+            S.maxDepth = EditorGUILayout.IntField("最大深度", S.maxDepth);
+            S.includeFiles = EditorGUILayout.Toggle("包含文件", S.includeFiles);
+            S.includeHidden = EditorGUILayout.Toggle("包含隐藏(.开头)", S.includeHidden);
+            S.showFileSize = EditorGUILayout.Toggle("显示文件大小", S.showFileSize);
+            S.minFileSizeBytes = EditorGUILayout.LongField("最小文件大小(B)", S.minFileSizeBytes);
+            S.useUnicodeTree = EditorGUILayout.Toggle("使用 Unicode 树形符号", S.useUnicodeTree);
+            S.sortFoldersFirst = EditorGUILayout.Toggle("文件夹优先排序", S.sortFoldersFirst);
+            S.alphabetical = EditorGUILayout.Toggle("按名称字母排序", S.alphabetical);
+            S.incremental = EditorGUILayout.Toggle(new GUIContent("增量模式", "用于超大项目避免一次性卡顿"), S.incremental);
+            S.collapseSingleChild = EditorGUILayout.Toggle("折叠单子目录链", S.collapseSingleChild);
+            S.ignoreMeta = EditorGUILayout.Toggle("忽略 .meta 文件", S.ignoreMeta);
+            S.trimTrailingSpaces = EditorGUILayout.Toggle("去除行尾空格", S.trimTrailingSpaces);
 
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("过滤", EditorStyles.boldLabel);
-            _settings.fileExtensionsFilter = EditorGUILayout.TextField(new GUIContent("扩展名过滤", "用逗号分隔，如: .cs,.png；留空=全部"), _settings.fileExtensionsFilter);
-            _settings.ignoreNamePatterns = EditorGUILayout.TextField(new GUIContent("忽略名称匹配(包含)", "逗号分隔，命中子串即忽略"), _settings.ignoreNamePatterns);
-            _settings.ignorePathContains = EditorGUILayout.TextField(new GUIContent("忽略路径包含", "逗号分隔，路径含任一即忽略"), _settings.ignorePathContains);
+            S.fileExtensionsFilter = EditorGUILayout.TextField(new GUIContent("扩展名过滤", "用逗号分隔，如: .cs,.png；留空=全部"), S.fileExtensionsFilter);
+            S.ignoreNamePatterns = EditorGUILayout.TextField(new GUIContent("忽略名称匹配(包含)", "逗号分隔，命中子串即忽略"), S.ignoreNamePatterns);
+            S.ignorePathContains = EditorGUILayout.TextField(new GUIContent("忽略路径包含", "逗号分隔，路径含任一即忽略"), S.ignorePathContains);
+
+            if (EditorGUI.EndChangeCheck())
+            {
+                EditorUtility.SetDirty(_settingsAsset);
+            }
+
+            EditorGUILayout.Space();
+            using (new EditorGUILayout.HorizontalScope())
+            {
+                if (GUILayout.Button("保存配置 (Mark Dirty)"))
+                {
+                    EditorUtility.SetDirty(_settingsAsset);
+                    AssetDatabase.SaveAssets();
+                }
+                if (GUILayout.Button("还原默认"))
+                {
+                    if (EditorUtility.DisplayDialog("确认", "恢复默认将丢失当前设置，确定？", "是", "否"))
+                    {
+                        _settingsAsset.ResetToDefault();
+                        GUI.FocusControl(null);
+                    }
+                }
+                if (GUILayout.Button("打开资产"))
+                {
+                    Selection.activeObject = _settingsAsset;
+                    EditorGUIUtility.PingObject(_settingsAsset);
+                }
+            }
 
             EditorGUILayout.EndVertical();
         }
@@ -140,7 +180,7 @@ namespace Editor.ProjectTools
             _processedFiles = 0;
             _lastGenTime = Time.realtimeSinceStartup;
 
-            _extensions = ParseExtensions(_settings.fileExtensionsFilter);
+            _extensions = ParseExtensions(S.fileExtensionsFilter);
             _cacheKey = BuildCacheKey();
             if (Cache.TryGetValue(_cacheKey, out var cached))
             {
@@ -149,7 +189,7 @@ namespace Editor.ProjectTools
                 return;
             }
 
-            if (_settings.incremental)
+            if (S.incremental)
             {
                 PrepareIncremental();
                 _isRunningIncremental = true;
@@ -186,15 +226,14 @@ namespace Editor.ProjectTools
                 prefix = "",
                 isLast = true
             });
-            _targetCountEstimate = 0; // 可不估算；或粗略统计目录数
+            _targetCountEstimate = 0;
         }
 
         private void OnEditorUpdate()
         {
             if (!_isRunningIncremental) return;
 
-            // 每帧处理一定量，避免长卡顿
-            int slice = 300; // 可调
+            int slice = 300;
             while (slice-- > 0 && _dirQueue.Count > 0)
             {
                 var task = _dirQueue.Dequeue();
@@ -220,23 +259,20 @@ namespace Editor.ProjectTools
         private void GenerateBlocking()
         {
             var root = Application.dataPath;
-            var rootInfo = new DirectoryInfo(root);
             AppendLine("Assets/");
-            // 收集第一层再递归
-            ProcessChildren(rootInfo, 0, ""); // root depth=0
+            ProcessChildren(new DirectoryInfo(root), 0, "");
         }
 
         private void ProcessChildren(DirectoryInfo dir, int depth, string parentPrefix)
         {
-            if (depth >= _settings.maxDepth) return;
+            if (depth >= S.maxDepth) return;
 
             var entries = SafeEnumerate(dir.FullName);
             var (folders, files) = SplitAndFilter(entries);
 
             SortLists(folders, files);
 
-            // 目录折叠单链
-            if (_settings.collapseSingleChild)
+            if (S.collapseSingleChild)
             {
                 CollapseSingleChildChains(folders);
             }
@@ -244,16 +280,14 @@ namespace Editor.ProjectTools
             for (int i = 0; i < folders.Count; i++)
             {
                 var folder = new DirectoryInfo(folders[i]);
-                bool isLast = (i == folders.Count - 1) && (!_settings.includeFiles || files.Count == 0);
+                bool isLast = (i == folders.Count - 1) && (!S.includeFiles || files.Count == 0);
                 var (branch, nextPrefix) = MakeBranches(parentPrefix, isLast);
                 AppendLine($"{branch}{folder.Name}/");
-
                 _processedDirs++;
-
                 ProcessChildren(folder, depth + 1, nextPrefix);
             }
 
-            if (_settings.includeFiles)
+            if (S.includeFiles)
             {
                 for (int i = 0; i < files.Count; i++)
                 {
@@ -280,19 +314,18 @@ namespace Editor.ProjectTools
                 _processedDirs++;
             }
 
-            if (task.depth >= _settings.maxDepth) return;
+            if (task.depth >= S.maxDepth) return;
 
             var entries = SafeEnumerate(task.path);
             var (folders, files) = SplitAndFilter(entries);
             SortLists(folders, files);
 
-            if (_settings.collapseSingleChild)
+            if (S.collapseSingleChild)
                 CollapseSingleChildChains(folders);
 
-            // 入队子目录
             for (int i = 0; i < folders.Count; i++)
             {
-                bool lastDir = (i == folders.Count - 1) && (!_settings.includeFiles || files.Count == 0);
+                bool lastDir = (i == folders.Count - 1) && (!S.includeFiles || files.Count == 0);
                 string nextPrefix = task.prefix + (task.depth == 0 ? "" : (task.isLast ? "    " : "│   "));
                 _dirQueue.Enqueue(new DirTask
                 {
@@ -303,7 +336,7 @@ namespace Editor.ProjectTools
                 });
             }
 
-            if (_settings.includeFiles)
+            if (S.includeFiles)
             {
                 for (int i = 0; i < files.Count; i++)
                 {
@@ -326,12 +359,10 @@ namespace Editor.ProjectTools
                 var name = Path.GetFileName(p);
                 if (string.IsNullOrEmpty(name)) continue;
 
-                // 忽略 meta
-                if (_settings.ignoreMeta && name.EndsWith(".meta", StringComparison.OrdinalIgnoreCase))
+                if (S.ignoreMeta && name.EndsWith(".meta", StringComparison.OrdinalIgnoreCase))
                     continue;
 
-                // hidden
-                if (!_settings.includeHidden && name.StartsWith("."))
+                if (!S.includeHidden && name.StartsWith("."))
                     continue;
 
                 if (IsIgnoredByName(name)) continue;
@@ -343,14 +374,14 @@ namespace Editor.ProjectTools
                 }
                 else
                 {
-                    if (!_settings.includeFiles) continue;
+                    if (!S.includeFiles) continue;
                     if (!PassExtensionFilter(name)) continue;
-                    if (_settings.minFileSizeBytes > 0)
+                    if (S.minFileSizeBytes > 0)
                     {
                         try
                         {
                             var len = new FileInfo(p).Length;
-                            if (len < _settings.minFileSizeBytes) continue;
+                            if (len < S.minFileSizeBytes) continue;
                         }
                         catch { }
                     }
@@ -362,8 +393,8 @@ namespace Editor.ProjectTools
 
         private bool IsIgnoredByName(string name)
         {
-            if (string.IsNullOrWhiteSpace(_settings.ignoreNamePatterns)) return false;
-            var tokens = _settings.ignoreNamePatterns.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+            if (string.IsNullOrWhiteSpace(S.ignoreNamePatterns)) return false;
+            var tokens = S.ignoreNamePatterns.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
             foreach (var t in tokens)
             {
                 var trim = t.Trim();
@@ -376,8 +407,8 @@ namespace Editor.ProjectTools
 
         private bool IsIgnoredByPath(string path)
         {
-            if (string.IsNullOrWhiteSpace(_settings.ignorePathContains)) return false;
-            var tokens = _settings.ignorePathContains.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+            if (string.IsNullOrWhiteSpace(S.ignorePathContains)) return false;
+            var tokens = S.ignorePathContains.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
             foreach (var t in tokens)
             {
                 var trim = t.Trim();
@@ -398,51 +429,36 @@ namespace Editor.ProjectTools
 
         private void SortLists(List<string> folders, List<string> files)
         {
-            if (_settings.alphabetical)
+            if (S.alphabetical)
             {
                 folders.Sort(StringComparer.OrdinalIgnoreCase);
                 files.Sort(StringComparer.OrdinalIgnoreCase);
-            }
-            if (!_settings.sortFoldersFirst)
-            {
-                // 如果用户不要求文件夹优先，则不需要额外处理；(默认 tree 输出仍分开)
             }
         }
 
         private void CollapseSingleChildChains(List<string> folders)
         {
-            // 我们只在输出时折叠，所以这里只改名字（path 不变）
-            // 简化：路径链折叠只改变最终显示可读性，在这里不处理真实结构。
-            // 若想真正折叠需在构建树结构时做，这里为了简单不实现完全折叠逻辑。
-            // 留接口以便后续扩展。
+            // TODO: 以后可实现真正折叠逻辑
         }
 
         private IEnumerable<string> SafeEnumerate(string path)
         {
             IEnumerable<string> enums;
-            try
-            {
-                enums = Directory.EnumerateFileSystemEntries(path);
-            }
-            catch
-            {
-                yield break;
-            }
-
-            foreach (var e in enums)
-                yield return e;
+            try { enums = Directory.EnumerateFileSystemEntries(path); }
+            catch { yield break; }
+            foreach (var e in enums) yield return e;
         }
 
         private (string branch, string nextPrefix) MakeBranches(string parentPrefix, bool isLast)
         {
             var branch = parentPrefix + GetBranch(isLast);
-            var nextPrefix = parentPrefix + (isLast ? "    " : (_settings.useUnicodeTree ? "│   " : "|   "));
+            var nextPrefix = parentPrefix + (isLast ? "    " : (S.useUnicodeTree ? "│   " : "|   "));
             return (branch, nextPrefix);
         }
 
         private string GetBranch(bool isLast)
         {
-            if (_settings.useUnicodeTree)
+            if (S.useUnicodeTree)
                 return isLast ? "└── " : "├── ";
             else
                 return isLast ? "+-- " : "|-- ";
@@ -450,7 +466,7 @@ namespace Editor.ProjectTools
 
         private string FormatFileName(FileInfo fi)
         {
-            if (!_settings.showFileSize) return fi.Name;
+            if (!S.showFileSize) return fi.Name;
             long size = fi.Length;
             return $"{fi.Name} ({FormatSize(size)})";
         }
@@ -468,7 +484,7 @@ namespace Editor.ProjectTools
 
         private void AppendLine(string line)
         {
-            if (_settings.trimTrailingSpaces)
+            if (S.trimTrailingSpaces)
                 line = line.TrimEnd();
             _builder.AppendLine(line);
             _lines++;
@@ -498,25 +514,36 @@ namespace Editor.ProjectTools
 
         private string BuildCacheKey()
         {
-            return $"{_settings.maxDepth}|{_settings.includeFiles}|{_settings.includeHidden}|{_settings.showFileSize}|{_settings.useUnicodeTree}|{_settings.sortFoldersFirst}|{_settings.alphabetical}|{_settings.fileExtensionsFilter}|{_settings.ignoreNamePatterns}|{_settings.ignorePathContains}|{_settings.minFileSizeBytes}|{_settings.ignoreMeta}|{_settings.collapseSingleChild}";
+            return $"{S.maxDepth}|{S.includeFiles}|{S.includeHidden}|{S.showFileSize}|{S.useUnicodeTree}|{S.sortFoldersFirst}|{S.alphabetical}|{S.fileExtensionsFilter}|{S.ignoreNamePatterns}|{S.ignorePathContains}|{S.minFileSizeBytes}|{S.ignoreMeta}|{S.collapseSingleChild}";
         }
 
-        // ---------- 对外静态快速调用 API ----------
-        /// <summary>
-        /// 直接生成（阻塞），返回字符串（默认使用一套简洁参数）。
-        /// </summary>
+        // ---------- 对外静态快速调用 API（保持兼容，不使用资产） ----------
         public static string GenerateStructureBlocking(
             bool includeFiles = true,
             int maxDepth = 50,
             string extensionsCsv = "",
             bool showFileSize = false)
         {
+            var tempSettings = new ProjectStructurePrinterSettings.SettingsData
+            {
+                includeFiles = includeFiles,
+                maxDepth = maxDepth,
+                fileExtensionsFilter = extensionsCsv,
+                showFileSize = showFileSize
+            };
+
             var window = CreateInstance<ProjectStructurePrinterWindow>();
-            window._settings.includeFiles = includeFiles;
-            window._settings.maxDepth = maxDepth;
-            window._settings.fileExtensionsFilter = extensionsCsv;
-            window._settings.showFileSize = showFileSize;
+            // 构造临时状态
+            window._settingsAsset = ScriptableObject.CreateInstance<ProjectStructurePrinterSettings>();
+            window._settingsAsset.ResetToDefault();
+            var dataField = window._settingsAsset.Data;
+            dataField.includeFiles = tempSettings.includeFiles;
+            dataField.maxDepth = tempSettings.maxDepth;
+            dataField.fileExtensionsFilter = tempSettings.fileExtensionsFilter;
+            dataField.showFileSize = tempSettings.showFileSize;
+
             window._builder = new StringBuilder(1024 * 512);
+            window._extensions = window.ParseExtensions(dataField.fileExtensionsFilter);
             window.GenerateBlocking();
             return window._builder.ToString();
         }
