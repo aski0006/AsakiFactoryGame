@@ -1,14 +1,15 @@
-﻿namespace Game.Singletons
-{
-    using System;
-    using System.Collections;
-    using System.Collections.Generic;
-    using System.Linq;
-    using UnityEngine;
-    using UnityEngine.SceneManagement;
+﻿using Game.Singletons.Core.Game.Singletons;
+using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
+using UnityEngine;
+using UnityEngine.SceneManagement;
 
-    namespace Game.Singletons
-    {
+namespace Game.Singletons.Core
+{
+
+   
         /// <summary>
         /// 全局单例管理器：根据配置创建/注册模块，并按优先级顺序执行多阶段初始化。
         /// 使用方式：
@@ -357,5 +358,5 @@
                 OnAllInitialized?.Invoke();
             }
         }
-    }
+    
 }

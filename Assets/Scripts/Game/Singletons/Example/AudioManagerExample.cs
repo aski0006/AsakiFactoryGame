@@ -1,4 +1,5 @@
-﻿using UnityEngine;
+﻿using Game.Singletons.Core;
+using UnityEngine;
 
 namespace Game.Singletons.Example
 {

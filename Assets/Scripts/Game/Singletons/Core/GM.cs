@@ -1,6 +1,4 @@
-﻿using Game.Singletons.Game.Singletons;
-
-namespace Game.Singletons
+﻿namespace Game.Singletons.Core
 {
     public class GM
     {

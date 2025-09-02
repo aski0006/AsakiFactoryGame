@@ -1,4 +1,5 @@
-﻿using System.Collections;
+﻿using Game.Singletons.Core;
+using System.Collections;
 using UnityEngine;
 
 namespace Game.Singletons.Example

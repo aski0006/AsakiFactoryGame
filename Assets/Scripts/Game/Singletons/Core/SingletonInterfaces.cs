@@ -1,7 +1,7 @@
-using Game.Singletons.Game.Singletons;
+using Game.Singletons.Core.Game.Singletons;
 using System.Collections;
 
-namespace Game.Singletons
+namespace Game.Singletons.Core
 {
     public class SingletonInterfaces
     {

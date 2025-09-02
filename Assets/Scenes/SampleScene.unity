@@ -369,7 +369,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 0b0f7e5bc71f457ba4b2a165f3e6339d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  config: {fileID: 11400000, guid: 723c4116ee3cf1e4cb0c2ac08fcd6749, type: 2}
+  config: {fileID: 11400000, guid: d75e71c1b85e5b0458109a8feab00707, type: 2}
   autoInitialize: 1
   verboseLogging: 1
 --- !u!4 &799713873

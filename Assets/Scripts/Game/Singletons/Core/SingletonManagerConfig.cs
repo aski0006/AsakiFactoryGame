@@ -1,11 +1,14 @@
-﻿namespace Game.Singletons
+﻿using Game.ScriptableObjectDB;
+using System;
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace Game.Singletons.Core
 {
-    using System;
-    using System.Collections.Generic;
-    using UnityEngine;
 
     namespace Game.Singletons
     {
+        [CustomConfig]
         [CreateAssetMenu(menuName = "Game/Singletons/Singleton Manager Config", fileName = "SingletonManagerConfig")]
         public class SingletonManagerConfig : ScriptableObject
         {
