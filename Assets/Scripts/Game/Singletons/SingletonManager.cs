@@ -1,4 +1,5 @@
-﻿using Game.Singletons.Core.Game.Singletons;
+﻿using Game.Singletons.Core;
+using Game.Singletons.Core.Game.Singletons;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -6,7 +7,7 @@ using System.Linq;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
-namespace Game.Singletons.Core
+namespace Game.Singletons
 {
 
    

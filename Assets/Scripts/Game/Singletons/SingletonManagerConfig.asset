@@ -19,3 +19,9 @@ MonoBehaviour:
     instantiateIfMissing: 1
     dontDestroyOnLoad: 1
     optional: 0
+  - key: GameContext
+    prefabComponent: {fileID: 483670573054832637, guid: ed2c797b58fc90342a16c99ee9d8dc8e, type: 3}
+    priority: 9
+    instantiateIfMissing: 1
+    dontDestroyOnLoad: 1
+    optional: 0

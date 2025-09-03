@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: ProjectStructurePrinterSettings
   m_EditorClassIdentifier: 
   data:
-    maxDepth: 20
+    maxDepth: 30
     includeFiles: 1
     includeHidden: 0
     showFileSize: 0
@@ -23,8 +23,8 @@ MonoBehaviour:
     incremental: 0
     collapseSingleChild: 0
     minFileSizeBytes: 0
-    fileExtensionsFilter: .md
+    fileExtensionsFilter: .cs
     ignoreNamePatterns: obj,bin,temp,.DS_Store,Thumbs.db,DefaultVolumeProfile,InputSystem_Actions,UniversalRenderPipelineGlobalSettings,Settings,Sprites,Scenes,UniTask
     ignorePathContains: Packages~,__backup__,~$
     ignoreMeta: 1
-    trimTrailingSpaces: 1
+    trimTrailingSpaces: 0
