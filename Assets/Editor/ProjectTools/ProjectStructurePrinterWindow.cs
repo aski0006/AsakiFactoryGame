@@ -39,13 +39,13 @@ namespace Editor.ProjectTools
             public bool isLast;
         }
 
-        [MenuItem("Tools/Project/Print Project Structure")]
+        [MenuItem("Tools/Project Tools/Print Project Structure")]
         public static void Open()
         {
             GetWindow<ProjectStructurePrinterWindow>("Project Structure");
         }
 
-        [MenuItem("Tools/Project/Create Project Structure Settings Asset")]
+        [MenuItem("Tools/Project Tools/Config/Create Project Structure Settings Asset")]
         public static void CreateSettingsAsset()
         {
             var asset = ProjectStructurePrinterSettings.LoadOrCreate();

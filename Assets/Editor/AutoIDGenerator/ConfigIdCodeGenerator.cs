@@ -74,7 +74,7 @@ namespace Game.Data.EditorTools
             "codeName","internalName","name","resourceName","displayName","editorName","EditorName"
         };
 
-        [MenuItem("Tools/Config DB/Generate Config Id Constants")]
+        [MenuItem("Tools/Core Generator/Generate Config Id Constants")]
         public static void Generate()
         {
             try

@@ -16,18 +16,19 @@ using UnityEngine.SceneManagement;
 namespace Game.Save
 {
     /// <summary>
-    /// 方案B实现：
-    /// - 若在尝试 Restore 时还没有任何 Provider，则不立刻标记 _restored，而是设置 _pendingRestore = true
-    /// - 第一个（或之后） Provider 注册 / 场景扫描完成后，若存在 _pendingRestore，则执行真正的 Restore
-    /// - 避免出现误导性的 “Restore 完成 0/0” 并仍能在稍后正确恢复
+    /// SaveManager
+    /// - 支持延迟 Restore（方案B）
+    /// - 增加快照有效性 / 空写防护 / 未变化跳过 / 首次恢复前禁止自动保存 等安全策略
+    /// - 同步与异步保存统一使用收集逻辑，并仅在真正写盘后清除 Dirty
     /// </summary>
     public class SaveManager : MonoBehaviour, SingletonInterfaces.ISyncInitialize
     {
-        [Header("Config (ScriptableObject)")] public SaveSystemConfig config;
+        [Header("Config (ScriptableObject)")]
+        public SaveSystemConfig config;
 
         [Header("State (Debug)")]
-        [SerializeField] private bool _loaded;
-        [SerializeField] private bool _restored;
+        [SerializeField] private bool _loaded;           // 是否已经有 _composite（来自磁盘或刚创建）
+        [SerializeField] private bool _restored;         // 是否已对当前已注册 Provider 执行 Restore
         [SerializeField] private int _loadedVersion;
         [SerializeField] private long _loadedTimestamp;
         [SerializeField] private int _sectionCount;
@@ -35,18 +36,26 @@ namespace Game.Save
         // Providers
         private readonly List<ISaveSectionProvider> _providers = new();
 
-        // 延迟恢复标记（方案B新增）
+        // 延迟恢复标记（无 Provider 时加载了存档）
         private bool _pendingRestore;
 
         // 自动保存
         private Coroutine _autoSaveRoutine;
 
-        // 存档聚合
+        // 存档聚合根
         private SaveRootData _composite;
         private ISaveEncryptor _encryptor;
         private IHashProvider _hash;
         private ISaveSerializer _serializer;
         private SaveService _service;
+
+        // 快照安全与去重
+        private string _lastSnapshotHash;
+        private bool _hasValidSnapshot;                         // 已经至少成功写过一次“有效快照”
+        private bool _firstRestoreCompleted => _restored && !_pendingRestore;
+
+        // 异步保存任务
+        private Task _ongoingSaveTask;
 
         public static SaveManager Instance { get; private set; }
 
@@ -76,7 +85,7 @@ namespace Game.Save
                 InternalLoad();
                 if (config.writeImmediatelyAfterFirstLoad && !_loaded)
                 {
-                    InternalSave();
+                    InternalSave(isManual: true);
                 }
             }
 
@@ -85,10 +94,10 @@ namespace Game.Save
                 SceneManager.sceneLoaded += OnSceneLoaded;
             }
 
-            // 如果不等待单例就恢复（restoreAfterSingletonsReady=false），先尝试延迟恢复
+            // 若不等待单例系统就恢复
             if (_loaded && config.loadOnAwake && !config.restoreAfterSingletonsReady)
             {
-                AttemptRestore(); // 可能会进入延迟
+                AttemptRestore(); // 可能进入延迟
             }
         }
 
@@ -100,7 +109,7 @@ namespace Game.Save
 
         public void Initialize()
         {
-            // 单例系统完成后再尝试
+            // 单例系统完成后再尝试恢复
             if (config.restoreAfterSingletonsReady && _loaded && !_restored)
             {
                 AttemptRestore();
@@ -111,20 +120,16 @@ namespace Game.Save
 
         #endregion
 
-        #region 方案B: 延迟 Restore 逻辑
+        #region 延迟 Restore 逻辑 (方案B)
 
-        /// <summary>
-        /// 外部发起一次“尝试恢复”操作。若无 Provider 则进入延迟。
-        /// </summary>
+        /// <summary>尝试恢复：若无 Provider 且有数据 -> 进入延迟模式。</summary>
         private void AttemptRestore()
         {
-            if (_restored) return; // 已恢复过
+            if (_restored) return;
             RestoreToProviders_Internal(allowDefer: true);
         }
 
-        /// <summary>
-        /// 在 Provider 注册或场景扫描后，若需要执行延迟恢复则调用。
-        /// </summary>
+        /// <summary>在有 Provider 注册或场景加载后，如果处于延迟状态则执行真正的恢复。</summary>
         private void TryRunDeferredRestore()
         {
             if (_pendingRestore && _loaded && !_restored)
@@ -141,10 +146,10 @@ namespace Game.Save
         {
             DiscoverProvidersInScene(scene);
 
-            // 如果之前是延迟恢复，现在尝试真正恢复
+            // 延迟 -> 正式恢复尝试
             TryRunDeferredRestore();
 
-            // 场景加载后（如果未等待单例或者单例已完成）也可能再尝试一次
+            // 兼容配置：再次尝试
             if (_loaded && !_restored && !config.restoreAfterSingletonsReady)
                 TryRunDeferredRestore();
             else if (_loaded && !_restored && config.restoreAfterSingletonsReady &&
@@ -168,10 +173,7 @@ namespace Game.Save
                 Debug.Log($"[SaveManager] Scene '{scene.name}' provider scan: +{added} (total {_providers.Count})");
         }
 
-        public void RegisterProvider(ISaveSectionProvider provider)
-        {
-            TryRegisterProvider(provider);
-        }
+        public void RegisterProvider(ISaveSectionProvider provider) => TryRegisterProvider(provider);
 
         public void UnregisterProvider(ISaveSectionProvider provider)
         {
@@ -197,7 +199,7 @@ namespace Game.Save
             if (_providers.Contains(p)) return false;
             _providers.Add(p);
 
-            // 若之前处于“延迟恢复”状态，现在有 Provider 加进来就执行真正恢复
+            // 若之前延迟恢复，现在尝试
             if (_pendingRestore && _loaded && !_restored)
             {
                 if (config.verboseLog)
@@ -206,7 +208,7 @@ namespace Game.Save
                 return true;
             }
 
-            // 如果已经恢复过（_restored = true），新 Provider 需要单独 RestoreSingleProvider
+            // 已经恢复完成后新注册的 Provider 需要单独恢复
             if (_loaded && _restored)
             {
                 RestoreSingleProvider(p);
@@ -217,16 +219,35 @@ namespace Game.Save
 
         #endregion
 
+        #region 快照哈希 / 工具
+
+        private string ComputeSnapshotHash(List<SectionBlob> sections)
+        {
+            unchecked
+            {
+                int h = 17;
+                for (int i = 0; i < sections.Count; i++)
+                {
+                    var s = sections[i];
+                    h = h * 31 + (s.key?.GetHashCode() ?? 0);
+                    h = h * 31 + (s.type?.GetHashCode() ?? 0);
+                    h = h * 31 + (s.json?.GetHashCode() ?? 0);
+                }
+                return h.ToString("X");
+            }
+        }
+
+        #endregion
+
         #region 同步保存 / 加载 / 恢复
 
-        public void ManualSave() => InternalSave();
+        public void ManualSave() => InternalSave(isManual: true);
 
         public void ManualLoad(bool restoreAfter = true)
         {
             InternalLoad();
             if (restoreAfter && _loaded)
             {
-                // 重新加载后重置相关状态
                 _restored = false;
                 _pendingRestore = false;
                 AttemptRestore();
@@ -241,6 +262,7 @@ namespace Game.Save
                 _loaded = false;
                 _loadedVersion = SaveRootData.CurrentVersion;
                 _loadedTimestamp = 0;
+                _sectionCount = 0;
                 if (config.verboseLog)
                     Debug.Log("[SaveManager] 无现存档，等待创建。");
                 return;
@@ -255,49 +277,54 @@ namespace Game.Save
                 Debug.Log($"[SaveManager] 已加载存档 version={_loadedVersion} sections={_sectionCount}");
         }
 
-        private void InternalSave()
+        private void InternalSave(bool isManual = false, bool forceAll = false)
         {
+            if (!CanProceedSave(isManual))
+            {
+                if (config.verboseLog)
+                    Debug.Log("[SaveManager] 保存被跳过（条件不满足）。");
+                return;
+            }
+
             if (_composite == null)
                 _composite = new SaveRootData();
 
-            var newList = new List<SectionBlob>();
-            foreach (var p in _providers)
+            // 收集 Section
+            var dirtyProvidersToClear = new List<IDirtySaveSectionProvider>();
+            var newList = CollectSections(forceAll, isManual, dirtyProvidersToClear);
+
+            if (!ValidateSnapshotList(newList, isManual))
+                return;
+
+            // 变化检测
+            if (config.skipIfUnchanged)
             {
-                if (p == null || !p.Ready) continue;
-                ISaveSection section;
-                try { section = p.Capture(); }
-                catch (Exception e)
+                string hash = ComputeSnapshotHash(newList);
+                if (_lastSnapshotHash == hash)
                 {
-                    Debug.LogError($"[SaveManager] Capture 异常 {p.GetType().Name}: {e}");
-                    continue;
+                    if (config.verboseLog)
+                        Debug.Log("[SaveManager] Snapshot 未变化，跳过写盘。");
+                    return;
                 }
-                if (section == null) continue;
-
-                Type type = section.GetType();
-                string sectionJson = _serializer.Serialize(section);
-                string key = GetProviderKey(p, type);
-                string typeName = config.storeTypeAssemblyQualified ? type.AssemblyQualifiedName : type.FullName;
-
-                newList.Add(new SectionBlob
-                {
-                    key = key,
-                    type = typeName,
-                    json = sectionJson
-                });
+                _lastSnapshotHash = hash;
             }
 
             _composite.sections = newList;
             _service.Save(_composite);
             _loaded = true;
-            // 保存代表当前内存是最新快照，但不改变恢复的语义；保持 _restored 状态不强制 true
 
-            if (config.logOnEveryAutoSave && config.verboseLog)
-                Debug.Log($"[SaveManager] Save 完成，Sections={newList.Count}");
+            if (newList.Count >= Math.Max(1, config.minSectionCountForValidSnapshot))
+                _hasValidSnapshot = true;
+
+            // 成功写盘后才清除 Dirty
+            for (int i = 0; i < dirtyProvidersToClear.Count; i++)
+                dirtyProvidersToClear[i].ClearDirty();
+
+            if ((isManual || config.logOnEveryAutoSave) && config.verboseLog)
+                Debug.Log($"[SaveManager] Save 完成 (Sync) Sections={newList.Count} manual={isManual}");
         }
 
-        /// <summary>
-        /// 内部恢复（allowDefer 控制是否允许进入延迟模式）。
-        /// </summary>
+        /// <summary>内部恢复（allowDefer 控制是否允许进入延迟模式）。</summary>
         private void RestoreToProviders_Internal(bool allowDefer)
         {
             if (_composite == null)
@@ -337,9 +364,6 @@ namespace Game.Save
                 Debug.Log($"[SaveManager] Restore 完成，成功 {success}/{_providers.Count}");
         }
 
-        /// <summary>
-        /// 对外使用的 Restore 调用（保持原语义）。
-        /// </summary>
         private void RestoreToProviders() => RestoreToProviders_Internal(allowDefer: false);
 
         private bool RestoreSingleProvider(ISaveSectionProvider p)
@@ -355,7 +379,12 @@ namespace Game.Save
                 try { p.Restore(null); }
                 catch (Exception e)
                 {
-                    FastString.Acquire().Tag("SaveManager").T("RestoreSingleProvider DefaultFail ").T(e.Message).Log();
+                    FastString
+                        .Acquire()
+                        .Tag("SaveManager")
+                        .T("RestoreSingleProvider DefaultFail ")
+                        .T(e.Message)
+                        .Log();
                 }
                 return false;
             }
@@ -397,39 +426,97 @@ namespace Game.Save
 
         #endregion
 
-        #region 异步 保存 / 加载 / 恢复
+        #region 异步保存 / 加载
 
-        private Task _ongoingSaveTask;
+        public Task ManualSaveAsync(bool forceAll = false, CancellationToken ct = default)
+            => InternalSaveAsync(forceAll, isManual: true, ct);
 
-        public Task ManualSaveAsync(bool forceAll = false, CancellationToken ct = default) =>
-            InternalSaveAsync(forceAll, ct);
-
-        private async Task InternalSaveAsync(bool forceAll, CancellationToken ct)
+        private async Task InternalSaveAsync(bool forceAll, bool isManual, CancellationToken ct)
         {
-            if (_ongoingSaveTask != null && !_ongoingSaveTask.IsCompleted)
+            if (!CanProceedSave(isManual))
             {
                 if (config.verboseLog)
-                    Debug.LogWarning("[SaveManager] 上一次异步保存尚未结束，跳过本次。");
+                    Debug.Log("[SaveManager] (Async) 保存被跳过（条件不满足）。");
                 return;
             }
 
-            PrepareCompositeSections(forceAll);
+            if (_ongoingSaveTask != null && !_ongoingSaveTask.IsCompleted)
+            {
+                if (config.verboseLog)
+                    Debug.LogWarning("[SaveManager] (Async) 上一次保存未结束，跳过。");
+                return;
+            }
+
+            if (_composite == null)
+                _composite = new SaveRootData();
+
+            var dirtyProviders = new List<IDirtySaveSectionProvider>();
+            var newList = CollectSections(forceAll, isManual, dirtyProviders);
+
+            if (!ValidateSnapshotList(newList, isManual))
+                return;
+
+            if (config.skipIfUnchanged)
+            {
+                string hash = ComputeSnapshotHash(newList);
+                if (_lastSnapshotHash == hash)
+                {
+                    if (config.verboseLog)
+                        Debug.Log("[SaveManager] (Async) Snapshot 未变化，跳过写盘。");
+                    return;
+                }
+                _lastSnapshotHash = hash;
+            }
+
+            _composite.sections = newList;
             Task task = _service.SaveAsync(_composite, ct);
             _ongoingSaveTask = task;
             await task;
             _loaded = true;
 
-            if (config.logOnEveryAutoSave && config.verboseLog)
-                Debug.Log($"[SaveManager] Save 完成 (Async)，Sections={_composite.sections.Count}");
+            if (newList.Count >= Math.Max(1, config.minSectionCountForValidSnapshot))
+                _hasValidSnapshot = true;
+
+            // 成功后清除 dirty
+            for (int i = 0; i < dirtyProviders.Count; i++)
+                dirtyProviders[i].ClearDirty();
+
+            if ((isManual || config.logOnEveryAutoSave) && config.verboseLog)
+                Debug.Log($"[SaveManager] Save 完成 (Async) Sections={newList.Count} manual={isManual}");
         }
 
-        private void PrepareCompositeSections(bool forceAll)
-        {
-            if (_composite == null)
-                _composite = new SaveRootData();
+        #endregion
 
-            var newList = new List<SectionBlob>();
-            foreach (ISaveSectionProvider p in _providers)
+        #region 保存策略 / 校验逻辑
+
+        /// <summary>是否允许继续保存。</summary>
+        private bool CanProceedSave(bool isManual)
+        {
+            // 没有加载任何存档（且不是手动）时，允许创建首个存档？—— 依据策略：
+            // 如果不允许，在此可 return false；目前允许，即不阻止 _loaded=false 场景的第一次保存。
+            // 但可以加一个策略：首次自动保存需满足最少 Provider 数等，可扩展。
+            if (!_loaded && !isManual && config.forbidAutoSaveBeforeFirstRestore)
+            {
+                // 仍未恢复成功，避免写出初次空快照
+                if (!_firstRestoreCompleted)
+                    return false;
+            }
+
+            // 如果禁止首次恢复前的自动保存
+            if (!isManual && config.forbidAutoSaveBeforeFirstRestore && !_firstRestoreCompleted)
+                return false;
+
+            // 如果要求必须已有一个有效快照后才继续自动保存（可扩展新的策略字段）
+            // if (!isManual && config.requireValidSnapshotBeforeAuto && !_hasValidSnapshot) return false;
+
+            return true;
+        }
+
+        /// <summary>收集 Providers 的 Section，不清除 dirty（写盘成功后再清除）。</summary>
+        private List<SectionBlob> CollectSections(bool forceAll, bool isManual, List<IDirtySaveSectionProvider> dirtyProvidersUsed)
+        {
+            var newList = new List<SectionBlob>(_providers.Count + 2);
+            foreach (var p in _providers)
             {
                 if (p == null || !p.Ready) continue;
 
@@ -457,10 +544,41 @@ namespace Game.Save
                     json = sectionJson
                 });
 
-                if (p is IDirtySaveSectionProvider dirtyAfter)
-                    dirtyAfter.ClearDirty();
+                if (p is IDirtySaveSectionProvider dirtyAfter && !dirtyProvidersUsed.Contains(dirtyAfter))
+                    dirtyProvidersUsed.Add(dirtyAfter);
             }
-            _composite.sections = newList;
+            return newList;
+        }
+
+        /// <summary>校验快照列表是否满足保存条件。</summary>
+        private bool ValidateSnapshotList(List<SectionBlob> list, bool isManual)
+        {
+            int count = list.Count;
+
+            if (count == 0)
+            {
+                if (!config.allowEmptySnapshot && !isManual)
+                {
+                    if (config.verboseLog)
+                        Debug.Log("[SaveManager] 空快照（自动）被拒绝。");
+                    return false;
+                }
+                // 手动保存或允许空快照：允许，但不标记有效
+                return true;
+            }
+
+            if (config.minSectionCountForValidSnapshot > 0 &&
+                count < config.minSectionCountForValidSnapshot)
+            {
+                if (!isManual)
+                {
+                    if (config.verboseLog)
+                        Debug.Log($"[SaveManager] 快照 Section 数 {count} < 最小要求 {config.minSectionCountForValidSnapshot}，跳过。");
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         #endregion
@@ -473,37 +591,38 @@ namespace Game.Save
             while (true)
             {
                 yield return wait;
-                if (!_loaded) continue;
-                InternalSave();
+                InternalSave(isManual: false);
             }
         }
 
         private void OnApplicationPause(bool pause)
         {
             if (config.saveOnPause && pause)
-                InternalSave();
+                InternalSave(isManual: false);
         }
 
         private void OnApplicationFocus(bool focus)
         {
             if (config.saveOnFocusLost && !focus)
-                InternalSave();
+                InternalSave(isManual: false);
         }
 
         private void OnApplicationQuit()
         {
             if (config.saveOnQuit)
-                InternalSave();
+                InternalSave(isManual: false);
         }
 
         #endregion
 
-        #region 工具 / 辅助
+        #region 依赖 / 反射工具
 
         private void SetupDependencies()
         {
             _serializer = new UnityJsonSerializer(config.prettyJson);
-            _encryptor = config.enableEncryption ? (ISaveEncryptor)NoOpEncryptor.Instance : NoOpEncryptor.Instance;
+            _encryptor = config.enableEncryption
+                ? (ISaveEncryptor)NoOpEncryptor.Instance // 预留：替换为真正加密
+                : NoOpEncryptor.Instance;
             _hash = config.enableHash
                 ? config.useSha256 ? Sha256HashProvider.Instance : NoOpHashProvider.Instance
                 : NoOpHashProvider.Instance;
@@ -552,7 +671,7 @@ namespace Game.Save
 
         #endregion
 
-        #region 开发期接口
+        #region 开发期接口 / 调试
 
         public void DevForceDiscover()
         {
@@ -572,7 +691,7 @@ namespace Game.Save
             RestoreToProviders_Internal(allowDefer: false);
         }
 
-        public void DevForceSave() => InternalSave();
+        public void DevForceSave() => InternalSave(isManual: true);
 
         public void DevDeleteSave()
         {
@@ -586,11 +705,13 @@ namespace Game.Save
             _restored = false;
             _pendingRestore = false;
             _composite = null;
+            _lastSnapshotHash = null;
+            _hasValidSnapshot = false;
         }
 
         public void DevLogProviders()
         {
-            Debug.Log($"[SaveManager] Providers={_providers.Count} loaded={_loaded} restored={_restored} pending={_pendingRestore}");
+            Debug.Log($"[SaveManager] Providers={_providers.Count} loaded={_loaded} restored={_restored} pending={_pendingRestore} validSnap={_hasValidSnapshot}");
             foreach (var p in _providers)
                 Debug.Log($"  - {p.GetType().Name} Ready={p.Ready}");
         }

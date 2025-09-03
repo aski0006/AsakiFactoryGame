@@ -18,6 +18,7 @@ namespace Game.Singletons
         /// 2. 在首个启动场景放置一个包含本脚本的 GameObject，拖入配置引用。
         /// 3. 运行后自动初始化（可关闭 autoInitialize 转而手动调用）。
         /// </summary>
+        [DefaultExecutionOrder(-4999)]
         public class SingletonManager : MonoBehaviour
         {
             public static SingletonManager Instance { get; private set; }

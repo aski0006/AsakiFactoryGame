@@ -11,7 +11,7 @@ namespace Game.Data
     public class GameContext : MonoBehaviour, IPreInitialize, ISyncInitialize, IOnRegistered
     {
         [SerializeField] private GameContextConfig config;
-
+    
         public static GameContext Instance { get; private set; }
         public GameRuntimeData Data { get; private set; }
 

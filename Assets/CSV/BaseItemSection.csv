@@ -1,0 +1,8 @@
+id,codeName,displayName,category,rarity,sortOrder,maxStack,droppable,storable,baseValue,unlockTier,iconGuid,description,tags
+1,Wood,木材,Resource,Common,0,100,true,true,0,0,,基础木材，可加工为木板。采集自树,
+2,CopperOre,铜矿石,Resource,Common,1,100,true,true,0,0,,含铜矿石，需要冶炼成铜锭。采集自铜矿,
+3,WoodPlank,木板,Resource,Common,3,100,true,true,0,0,,基础结构材料。,
+4,CopperIngot,铜锭,Resource,Common,4,100,false,false,0,0,,基础金属材料。 ,
+5,KeyFragment,钥匙碎片,Key,Uncommon,5,50,true,true,0,0,,合成副本钥匙的组成部分。,
+6,DungeonKey,地下钥匙,Key,Rare,6,10,true,true,0,0,,用于开启一次性副本入口。,
+7,RareCrystal,稀有水晶,Resource,Rare,7,50,true,true,0,0,,副本奖励，占位未来科技用途。,
