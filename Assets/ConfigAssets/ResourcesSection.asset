@@ -16,48 +16,30 @@ MonoBehaviour:
   - description: "\u6728\u6750"
     definition:
       id: 1
-      resourceName: Wood
-      renewable: 0
+      codeName: Wood
       icon: {fileID: 0}
-      respawnTime: 0
-      maxGatherCount: 0
   - description: "\u94DC\u77FF\u77F3"
     definition:
       id: 2
-      resourceName: CopperOre
-      renewable: 0
+      codeName: CopperOre
       icon: {fileID: 0}
-      respawnTime: 0
-      maxGatherCount: 0
   - description: "\u6728\u677F"
     definition:
       id: 3
-      resourceName: WoodPlank
-      renewable: 0
+      codeName: WoodPlank
       icon: {fileID: 0}
-      respawnTime: 0
-      maxGatherCount: 0
   - description: "\u94DC\u952D"
     definition:
       id: 4
-      resourceName: CopperIngot
-      renewable: 0
+      codeName: CopperIngot
       icon: {fileID: 0}
-      respawnTime: 0
-      maxGatherCount: 0
   - description: "\u94A5\u5319\u788E\u7247"
     definition:
       id: 5
-      resourceName: KeyFragment
-      renewable: 0
+      codeName: KeyFragment
       icon: {fileID: 0}
-      respawnTime: 0
-      maxGatherCount: 0
   - description: "\u5730\u7262\u94A5\u5319"
     definition:
       id: 6
-      resourceName: DungeonKey
-      renewable: 0
+      codeName: DungeonKey
       icon: {fileID: 0}
-      respawnTime: 0
-      maxGatherCount: 0

@@ -9,5 +9,6 @@ namespace Game.Data.Core
     public interface IDefinition
     {
         int Id { get; }
+        string CodeName { get; }
     }
 }

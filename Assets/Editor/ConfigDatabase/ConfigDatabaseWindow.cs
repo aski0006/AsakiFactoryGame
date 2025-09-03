@@ -6,7 +6,7 @@ using System.Linq;
 using UnityEditor;
 using UnityEngine;
 
-namespace Editor.ConfigDB
+namespace Editor.ConfigDatabase
 {
     /// <summary>
     /// 集中管理数据库窗口：

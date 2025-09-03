@@ -8,8 +8,10 @@ namespace Game.Data.Items.Resource
     public class ResourceDefinition : IDefinition
     {
         [SerializeField] private int id; // 使用枚举作为 ID
+        [SerializeField] private string codeName; // 资源代码名称
         public int Id => id; // 实现 IDefinition.Id
-        public string resourceName; // 资源名称
+        public string CodeName => codeName;
+        
         public Sprite icon;
     }
 }
