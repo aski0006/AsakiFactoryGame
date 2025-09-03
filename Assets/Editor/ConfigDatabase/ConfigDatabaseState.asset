@@ -12,7 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b28e3e02f7444290a78dddb23985f0b3, type: 3}
   m_Name: ConfigDatabaseState
   m_EditorClassIdentifier: 
-  selectedTypeIndex: 2
+  selectedTypeIndex: 0
   searchText: 
   caseSensitiveSearch: 0
   showInspectorEmbedded: 1
@@ -33,9 +33,15 @@ MonoBehaviour:
   - Game.Singletons.Core.Game.Singletons.SingletonManagerConfig
   - Game.Data.Items.Resource.ResourcesSection
   - Game.Data.Core.GameContextConfig
+  - Game.Data.Definition.Recipes.BaseRecipeSection
+  - Game.Data.Definition.Machines.BaseMachineSection
+  - Game.Data.Definition.Items.BaseItemSection
   typeSelectionGuids:
   - baef602c0fa99f847bdbc865dfd116e2
   - c74dafff408102044a538688c6952038
   - d75e71c1b85e5b0458109a8feab00707
   - 0e0c111f57059034c9fe14a03f9b3cb5
   - 58b4b35282021594dbd29002ac0a72ce
+  - 753adea7ac19af947bdcec455e30e4d7
+  - e28aef3e240185e48aa8a46117f033ec
+  - 8ef2f21819fb45e4e8e552f8ee81758e

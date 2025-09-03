@@ -1,4 +1,5 @@
-﻿using Game.Save.Core;
+﻿using Game.Core.Debug.FastString;
+using Game.Save.Core;
 using Game.Singletons;
 using Game.Singletons.Core;
 using System;
@@ -14,12 +15,15 @@ using UnityEngine.SceneManagement;
 
 namespace Game.Save
 {
-    public class SaveManager : MonoBehaviour,
-                               SingletonInterfaces.ISyncInitialize // 可让 SingletonManager 在同步阶段调用 Initialize()
+    /// <summary>
+    /// 方案B实现：
+    /// - 若在尝试 Restore 时还没有任何 Provider，则不立刻标记 _restored，而是设置 _pendingRestore = true
+    /// - 第一个（或之后） Provider 注册 / 场景扫描完成后，若存在 _pendingRestore，则执行真正的 Restore
+    /// - 避免出现误导性的 “Restore 完成 0/0” 并仍能在稍后正确恢复
+    /// </summary>
+    public class SaveManager : MonoBehaviour, SingletonInterfaces.ISyncInitialize
     {
-
-        [Header("Config (ScriptableObject)")]
-        public SaveSystemConfig config;
+        [Header("Config (ScriptableObject)")] public SaveSystemConfig config;
 
         [Header("State (Debug)")]
         [SerializeField] private bool _loaded;
@@ -28,34 +32,23 @@ namespace Game.Save
         [SerializeField] private long _loadedTimestamp;
         [SerializeField] private int _sectionCount;
 
-        // 运行时：已注册 Provider
-        private readonly List<ISaveSectionProvider> _providers = new List<ISaveSectionProvider>();
+        // Providers
+        private readonly List<ISaveSectionProvider> _providers = new();
+
+        // 延迟恢复标记（方案B新增）
+        private bool _pendingRestore;
 
         // 自动保存
         private Coroutine _autoSaveRoutine;
-        // 临时缓存：加载的 composite
+
+        // 存档聚合
         private SaveRootData _composite;
         private ISaveEncryptor _encryptor;
         private IHashProvider _hash;
         private ISaveSerializer _serializer;
-
         private SaveService _service;
+
         public static SaveManager Instance { get; private set; }
-
-        #region 自动保存
-
-        private IEnumerator AutoSaveLoop()
-        {
-            WaitForSeconds wait = new WaitForSeconds(Mathf.Max(5f, config.autoIntervalSeconds));
-            while (true)
-            {
-                yield return wait;
-                if (!_loaded) continue; // 还没加载（或尚未创建）就跳过
-                InternalSave();
-            }
-        }
-
-        #endregion
 
         #region Unity 生命周期
 
@@ -83,7 +76,6 @@ namespace Game.Save
                 InternalLoad();
                 if (config.writeImmediatelyAfterFirstLoad && !_loaded)
                 {
-                    // 首次无存档 -> 写入默认
                     InternalSave();
                 }
             }
@@ -91,6 +83,12 @@ namespace Game.Save
             if (config.autoDiscoverProvidersOnSceneLoad)
             {
                 SceneManager.sceneLoaded += OnSceneLoaded;
+            }
+
+            // 如果不等待单例就恢复（restoreAfterSingletonsReady=false），先尝试延迟恢复
+            if (_loaded && config.loadOnAwake && !config.restoreAfterSingletonsReady)
+            {
+                AttemptRestore(); // 可能会进入延迟
             }
         }
 
@@ -102,14 +100,36 @@ namespace Game.Save
 
         public void Initialize()
         {
-            // 来自 SingletonManager 的同步初始化回调(如果在配置里)
+            // 单例系统完成后再尝试
             if (config.restoreAfterSingletonsReady && _loaded && !_restored)
             {
-                RestoreToProviders();
+                AttemptRestore();
             }
             if (config.autoIntervalEnabled)
-            {
                 _autoSaveRoutine = StartCoroutine(AutoSaveLoop());
+        }
+
+        #endregion
+
+        #region 方案B: 延迟 Restore 逻辑
+
+        /// <summary>
+        /// 外部发起一次“尝试恢复”操作。若无 Provider 则进入延迟。
+        /// </summary>
+        private void AttemptRestore()
+        {
+            if (_restored) return; // 已恢复过
+            RestoreToProviders_Internal(allowDefer: true);
+        }
+
+        /// <summary>
+        /// 在 Provider 注册或场景扫描后，若需要执行延迟恢复则调用。
+        /// </summary>
+        private void TryRunDeferredRestore()
+        {
+            if (_pendingRestore && _loaded && !_restored)
+            {
+                RestoreToProviders_Internal(allowDefer: false);
             }
         }
 
@@ -120,32 +140,34 @@ namespace Game.Save
         private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
             DiscoverProvidersInScene(scene);
-            // 场景加载后若之前已加载存档且还没 restore 过，也可尝试 restore
-            if (_loaded && !_restored && (!config.restoreAfterSingletonsReady || SingletonManager.Instance?.IsInitialized == true))
-            {
-                RestoreToProviders();
-            }
+
+            // 如果之前是延迟恢复，现在尝试真正恢复
+            TryRunDeferredRestore();
+
+            // 场景加载后（如果未等待单例或者单例已完成）也可能再尝试一次
+            if (_loaded && !_restored && !config.restoreAfterSingletonsReady)
+                TryRunDeferredRestore();
+            else if (_loaded && !_restored && config.restoreAfterSingletonsReady &&
+                     SingletonManager.Instance?.IsInitialized == true)
+                TryRunDeferredRestore();
         }
 
         private void DiscoverProvidersInScene(Scene scene)
         {
             var all = FindObjectsOfType<MonoBehaviour>(config.discoverInactiveGameObjects);
             int added = 0;
-            foreach (MonoBehaviour mb in all)
+            foreach (var mb in all)
             {
                 if (mb is ISaveSectionProvider p)
                 {
-                    TryRegisterProvider(p);
-                    added++;
+                    if (TryRegisterProvider(p))
+                        added++;
                 }
             }
             if (config.verboseLog)
                 Debug.Log($"[SaveManager] Scene '{scene.name}' provider scan: +{added} (total {_providers.Count})");
         }
 
-        /// <summary>
-        ///     供外部（或 provider 自己 OnEnable）调用的注册。
-        /// </summary>
         public void RegisterProvider(ISaveSectionProvider provider)
         {
             TryRegisterProvider(provider);
@@ -157,45 +179,58 @@ namespace Game.Save
             _providers.Remove(provider);
         }
 
-        private void TryRegisterProvider(ISaveSectionProvider p)
+        private bool TryRegisterProvider(ISaveSectionProvider p)
         {
-            if (p == null) return;
-            Type t = p.GetType();
-            string fullName = t.FullName;
+            if (p == null) return false;
+            string fullName = p.GetType().FullName;
+
             if (!string.IsNullOrEmpty(fullName))
             {
                 if (config.explicitIncludeTypeNames.Count > 0 &&
                     !config.explicitIncludeTypeNames.Contains(fullName))
-                    return;
+                    return false;
 
                 if (config.excludeTypeNames.Contains(fullName))
-                    return;
+                    return false;
             }
 
-            if (_providers.Contains(p)) return;
+            if (_providers.Contains(p)) return false;
             _providers.Add(p);
 
-            // 如果已经有存档并且已经做过 Restore，新的 provider 需要单独 Restore
+            // 若之前处于“延迟恢复”状态，现在有 Provider 加进来就执行真正恢复
+            if (_pendingRestore && _loaded && !_restored)
+            {
+                if (config.verboseLog)
+                    Debug.Log($"[SaveManager] Provider {p.GetType().Name} 注册，执行延迟恢复。");
+                TryRunDeferredRestore();
+                return true;
+            }
+
+            // 如果已经恢复过（_restored = true），新 Provider 需要单独 RestoreSingleProvider
             if (_loaded && _restored)
             {
                 RestoreSingleProvider(p);
             }
+
+            return true;
         }
 
         #endregion
 
         #region 同步保存 / 加载 / 恢复
 
-        public void ManualSave()
-        {
-            InternalSave();
-        }
+        public void ManualSave() => InternalSave();
 
         public void ManualLoad(bool restoreAfter = true)
         {
             InternalLoad();
             if (restoreAfter && _loaded)
-                RestoreToProviders();
+            {
+                // 重新加载后重置相关状态
+                _restored = false;
+                _pendingRestore = false;
+                AttemptRestore();
+            }
         }
 
         private void InternalLoad()
@@ -225,9 +260,8 @@ namespace Game.Save
             if (_composite == null)
                 _composite = new SaveRootData();
 
-            // 抓取所有 provider section
             var newList = new List<SectionBlob>();
-            foreach (ISaveSectionProvider p in _providers)
+            foreach (var p in _providers)
             {
                 if (p == null || !p.Ready) continue;
                 ISaveSection section;
@@ -248,20 +282,23 @@ namespace Game.Save
                 {
                     key = key,
                     type = typeName,
-                    json = sectionJson,
+                    json = sectionJson
                 });
             }
 
             _composite.sections = newList;
             _service.Save(_composite);
-            _loaded = true; // 已有存档
-            _restored = true; // 当前内存即为最新状态
+            _loaded = true;
+            // 保存代表当前内存是最新快照，但不改变恢复的语义；保持 _restored 状态不强制 true
 
             if (config.logOnEveryAutoSave && config.verboseLog)
                 Debug.Log($"[SaveManager] Save 完成，Sections={newList.Count}");
         }
 
-        private void RestoreToProviders()
+        /// <summary>
+        /// 内部恢复（allowDefer 控制是否允许进入延迟模式）。
+        /// </summary>
+        private void RestoreToProviders_Internal(bool allowDefer)
         {
             if (_composite == null)
             {
@@ -270,36 +307,59 @@ namespace Game.Save
                 return;
             }
 
+            if (_providers.Count == 0)
+            {
+                if (allowDefer && _composite.sections != null && _composite.sections.Count > 0)
+                {
+                    _pendingRestore = true;
+                    if (config.verboseLog)
+                        Debug.Log("[SaveManager] 进入延迟 Restore 状态（尚无 Provider）。");
+                }
+                else
+                {
+                    if (config.verboseLog)
+                        Debug.Log("[SaveManager] Restore 0/0 (无 Provider 且不允许延迟)");
+                }
+                return;
+            }
+
             int success = 0;
-            foreach (ISaveSectionProvider p in _providers)
+            foreach (var p in _providers)
             {
                 if (RestoreSingleProvider(p))
                     success++;
             }
 
             _restored = true;
+            _pendingRestore = false;
+
             if (config.verboseLog)
                 Debug.Log($"[SaveManager] Restore 完成，成功 {success}/{_providers.Count}");
         }
+
+        /// <summary>
+        /// 对外使用的 Restore 调用（保持原语义）。
+        /// </summary>
+        private void RestoreToProviders() => RestoreToProviders_Internal(allowDefer: false);
 
         private bool RestoreSingleProvider(ISaveSectionProvider p)
         {
             if (p == null) return false;
             if (_composite?.sections == null) return false;
 
-            // 取得 key & section blob
             Type targetType = GetProviderSectionType(p);
             string key = GetProviderKey(p, targetType);
             SectionBlob blob = _composite.sections.FirstOrDefault(s => s.key == key);
             if (blob == null)
             {
-                // 没有数据 -> 默认/忽略
                 try { p.Restore(null); }
-                catch { }
+                catch (Exception e)
+                {
+                    FastString.Acquire().Tag("SaveManager").T("RestoreSingleProvider DefaultFail ").T(e.Message).Log();
+                }
                 return false;
             }
 
-            // 类型匹配检查
             Type resolvedType = ResolveSectionType(blob.type);
             if (resolvedType == null || targetType == null)
             {
@@ -308,8 +368,6 @@ namespace Game.Save
             }
             if (resolvedType != targetType)
             {
-                // 如果类型不一样，可以尝试兼容（例如版本迁移后换了类名）：
-                // 本示例直接警告并跳过。
                 Debug.LogWarning($"[SaveManager] Section 类型不一致: blob={resolvedType.FullName} target={targetType.FullName}");
             }
 
@@ -332,6 +390,8 @@ namespace Game.Save
                 Debug.LogError($"[SaveManager] Restore 调用异常 provider={p.GetType().Name} err={e}");
                 return false;
             }
+            if (config.verboseLog)
+                Debug.Log($"[SaveManager] 单 Provider Restore 成功 key={key}");
             return true;
         }
 
@@ -340,12 +400,10 @@ namespace Game.Save
         #region 异步 保存 / 加载 / 恢复
 
         private Task _ongoingSaveTask;
-    
-        public Task ManualSaveAsync(bool forceAll = false, CancellationToken ct = default(CancellationToken))
-        {
-            return InternalSaveAsync(forceAll, ct);
-        }
-    
+
+        public Task ManualSaveAsync(bool forceAll = false, CancellationToken ct = default) =>
+            InternalSaveAsync(forceAll, ct);
+
         private async Task InternalSaveAsync(bool forceAll, CancellationToken ct)
         {
             if (_ongoingSaveTask != null && !_ongoingSaveTask.IsCompleted)
@@ -360,7 +418,6 @@ namespace Game.Save
             _ongoingSaveTask = task;
             await task;
             _loaded = true;
-            _restored = true;
 
             if (config.logOnEveryAutoSave && config.verboseLog)
                 Debug.Log($"[SaveManager] Save 完成 (Async)，Sections={_composite.sections.Count}");
@@ -376,7 +433,6 @@ namespace Game.Save
             {
                 if (p == null || !p.Ready) continue;
 
-                // 脏过滤
                 if (!forceAll && p is IDirtySaveSectionProvider dirtyProv && !dirtyProv.Dirty)
                     continue;
 
@@ -398,7 +454,7 @@ namespace Game.Save
                 {
                     key = key,
                     type = typeName,
-                    json = sectionJson,
+                    json = sectionJson
                 });
 
                 if (p is IDirtySaveSectionProvider dirtyAfter)
@@ -409,7 +465,18 @@ namespace Game.Save
 
         #endregion
 
-        #region 事件钩子
+        #region 自动保存钩子
+
+        private IEnumerator AutoSaveLoop()
+        {
+            WaitForSeconds wait = new(Mathf.Max(5f, config.autoIntervalSeconds));
+            while (true)
+            {
+                yield return wait;
+                if (!_loaded) continue;
+                InternalSave();
+            }
+        }
 
         private void OnApplicationPause(bool pause)
         {
@@ -431,7 +498,7 @@ namespace Game.Save
 
         #endregion
 
-        #region 辅助 / 工具
+        #region 工具 / 辅助
 
         private void SetupDependencies()
         {
@@ -451,18 +518,14 @@ namespace Game.Save
         {
             if (provider is ICustomSaveSectionKey custom && !string.IsNullOrWhiteSpace(custom.Key))
                 return custom.Key;
-
-            // 默认策略：SectionType.FullName
             return sectionType?.FullName ?? provider.GetType().FullName;
         }
 
         private Type GetProviderSectionType(ISaveSectionProvider provider)
         {
-
             if (provider is IExposeSectionType expose && expose.SectionType != null)
                 return expose.SectionType;
 
-            // 退化：尝试通过命名约定（XxxProvider -> XxxSection）
             string name = provider.GetType().FullName;
             if (name != null)
             {
@@ -471,8 +534,6 @@ namespace Game.Save
                 if (t != null && typeof(ISaveSection).IsAssignableFrom(t))
                     return t;
             }
-            // 最终无法推断 -> 需要在首次 Save 前调用一次 Capture() 获取真实类型
-            // 为避免副作用，这里返回 null，首次 Save 时会实际 Capture 并写入。
             return null;
         }
 
@@ -481,9 +542,6 @@ namespace Game.Save
             if (string.IsNullOrEmpty(storedTypeName)) return null;
             Type t = Type.GetType(storedTypeName);
             if (t != null) return t;
-
-            // 兼容：如果存的是 FullName 而当前需要 AssemblyQualifiedName，或反之
-            // 这里简单再次遍历所有已加载程序集搜索一次（轻量项目可接受）
             foreach (Assembly asm in AppDomain.CurrentDomain.GetAssemblies())
             {
                 Type candidate = asm.GetType(storedTypeName);
@@ -494,11 +552,12 @@ namespace Game.Save
 
         #endregion
 
-        #region 调试 / 开发期接口
+        #region 开发期接口
 
         public void DevForceDiscover()
         {
             DiscoverProvidersInScene(SceneManager.GetActiveScene());
+            TryRunDeferredRestore();
         }
 
         public void DevForceRestore()
@@ -508,13 +567,12 @@ namespace Game.Save
                 Debug.LogWarning("[SaveManager] 未加载任何存档，无法 Restore。");
                 return;
             }
-            RestoreToProviders();
+            _pendingRestore = false;
+            _restored = false;
+            RestoreToProviders_Internal(allowDefer: false);
         }
 
-        public void DevForceSave()
-        {
-            InternalSave();
-        }
+        public void DevForceSave() => InternalSave();
 
         public void DevDeleteSave()
         {
@@ -526,7 +584,15 @@ namespace Game.Save
                 Debug.Log("[SaveManager] 已删除存档文件。");
             _loaded = false;
             _restored = false;
+            _pendingRestore = false;
             _composite = null;
+        }
+
+        public void DevLogProviders()
+        {
+            Debug.Log($"[SaveManager] Providers={_providers.Count} loaded={_loaded} restored={_restored} pending={_pendingRestore}");
+            foreach (var p in _providers)
+                Debug.Log($"  - {p.GetType().Name} Ready={p.Ready}");
         }
 
         #endregion

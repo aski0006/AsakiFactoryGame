@@ -1,0 +1,127 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ea596929c34d4b3dbc9eff2a3a765bb1, type: 3}
+  m_Name: BaseItemSection
+  m_EditorClassIdentifier: 
+  definitions:
+  - description: "\u6728\u6750"
+    definition:
+      id: 1
+      codeName: Wood
+      displayName: "\u6728\u6750"
+      category: 0
+      rarity: 0
+      sortOrder: 0
+      maxStack: 100
+      droppable: 1
+      storable: 1
+      baseValue: 0
+      unlockTier: 0
+      icon: {fileID: 0}
+      description: "\u57FA\u7840\u6728\u6750\uFF0C\u53EF\u52A0\u5DE5\u4E3A\u6728\u677F\u3002\u91C7\u96C6\u81EA\u6811"
+      tags: []
+  - description: "\u94DC\u77FF\u77F3"
+    definition:
+      id: 2
+      codeName: CopperOre
+      displayName: "\u94DC\u77FF\u77F3"
+      category: 0
+      rarity: 0
+      sortOrder: 1
+      maxStack: 100
+      droppable: 1
+      storable: 1
+      baseValue: 0
+      unlockTier: 0
+      icon: {fileID: 0}
+      description: "\u542B\u94DC\u77FF\u77F3\uFF0C\u9700\u8981\u51B6\u70BC\u6210\u94DC\u952D\u3002\u91C7\u96C6\u81EA\u94DC\u77FF"
+      tags: []
+  - description: "\u6728\u677F"
+    definition:
+      id: 3
+      codeName: WoodPlank
+      displayName: "\u6728\u677F"
+      category: 0
+      rarity: 0
+      sortOrder: 3
+      maxStack: 100
+      droppable: 1
+      storable: 1
+      baseValue: 0
+      unlockTier: 0
+      icon: {fileID: 0}
+      description: "\u57FA\u7840\u7ED3\u6784\u6750\u6599\u3002"
+      tags: []
+  - description: "\u94DC\u952D"
+    definition:
+      id: 4
+      codeName: CopperIngot
+      displayName: "\u94DC\u952D"
+      category: 0
+      rarity: 0
+      sortOrder: 4
+      maxStack: 100
+      droppable: 0
+      storable: 0
+      baseValue: 0
+      unlockTier: 0
+      icon: {fileID: 0}
+      description: "\u57FA\u7840\u91D1\u5C5E\u6750\u6599\u3002 "
+      tags: []
+  - description: "\u94A5\u5319\u788E\u7247"
+    definition:
+      id: 5
+      codeName: KeyFragment
+      displayName: "\u94A5\u5319\u788E\u7247"
+      category: 2
+      rarity: 1
+      sortOrder: 5
+      maxStack: 50
+      droppable: 1
+      storable: 1
+      baseValue: 0
+      unlockTier: 0
+      icon: {fileID: 0}
+      description: "\u5408\u6210\u526F\u672C\u94A5\u5319\u7684\u7EC4\u6210\u90E8\u5206\u3002"
+      tags: []
+  - description: "\u5730\u4E0B\u94A5\u5319"
+    definition:
+      id: 6
+      codeName: DungeonKey
+      displayName: "\u5730\u4E0B\u94A5\u5319"
+      category: 2
+      rarity: 2
+      sortOrder: 6
+      maxStack: 10
+      droppable: 1
+      storable: 1
+      baseValue: 0
+      unlockTier: 0
+      icon: {fileID: 0}
+      description: "\u7528\u4E8E\u5F00\u542F\u4E00\u6B21\u6027\u526F\u672C\u5165\u53E3\u3002"
+      tags: []
+  - description: "\u7A00\u6709\u6C34\u6676"
+    definition:
+      id: 7
+      codeName: RareCrystal
+      displayName: "\u7A00\u6709\u6C34\u6676"
+      category: 0
+      rarity: 2
+      sortOrder: 7
+      maxStack: 50
+      droppable: 1
+      storable: 1
+      baseValue: 0
+      unlockTier: 0
+      icon: {fileID: 0}
+      description: "\u526F\u672C\u5956\u52B1\uFF0C\u5360\u4F4D\u672A\u6765\u79D1\u6280\u7528\u9014\u3002"
+      tags: []

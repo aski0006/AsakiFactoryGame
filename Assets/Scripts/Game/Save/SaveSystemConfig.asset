@@ -12,13 +12,13 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 063fc6cc8a62443fab78db3ed3f3f30d, type: 3}
   m_Name: SaveSystemConfig
   m_EditorClassIdentifier: 
-  fileName: save.dat
+  fileName: save.json
   useBackup: 1
   prettyJson: 0
   storeTypeAssemblyQualified: 0
   enableEncryption: 0
-  enableHash: 1
-  useSha256: 1
+  enableHash: 0
+  useSha256: 0
   encryptionKey: 
   saveOnQuit: 1
   saveOnPause: 1
@@ -27,7 +27,7 @@ MonoBehaviour:
   autoIntervalSeconds: 120
   loadOnAwake: 1
   restoreAfterSingletonsReady: 1
-  autoDiscoverProvidersOnSceneLoad: 0
+  autoDiscoverProvidersOnSceneLoad: 1
   discoverInactiveGameObjects: 0
   excludeTypeNames: []
   explicitIncludeTypeNames: []
