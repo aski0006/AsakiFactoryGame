@@ -13,7 +13,7 @@ MonoBehaviour:
   m_Name: BaseRecipeSection
   m_EditorClassIdentifier: 
   definitions:
-  - description: "\u6728\u6750\u5236\u6728\u677F"
+  - description: 
     definition:
       id: 400
       codeName: Wood_To_WoodPlank
@@ -23,11 +23,11 @@ MonoBehaviour:
         Count: 1
       outputs:
       - ItemId: 3
-        Count: 1
+        Count: 3
       timeSeconds: 2
       machineType: 1
       allowHandCraft: 0
-      batchLimit: 0
+      batchLimit: 1
       consumeInputsAtStart: 0
       unlockTier: 0
       unlockedByDefault: 0
@@ -35,7 +35,7 @@ MonoBehaviour:
       tags: []
       energyCost: 0
       xpReward: 0
-  - description: "\u51B6\u70BC\u94DC\u952D"
+  - description: 
     definition:
       id: 401
       codeName: CopperOre_To_CopperIngot
@@ -45,11 +45,11 @@ MonoBehaviour:
         Count: 1
       outputs:
       - ItemId: 4
-        Count: 1
+        Count: 2
       timeSeconds: 4
       machineType: 0
       allowHandCraft: 0
-      batchLimit: 0
+      batchLimit: 1
       consumeInputsAtStart: 0
       unlockTier: 0
       unlockedByDefault: 0
@@ -57,11 +57,11 @@ MonoBehaviour:
       tags: []
       energyCost: 0
       xpReward: 0
-  - description: "\u5408\u6210\u94A5\u5319\u788E\u7247"
+  - description: 
     definition:
       id: 402
       codeName: PlankIngot_To_KeyFragment
-      displayName: 
+      displayName: "\u5408\u6210\u5730\u4E0B\u94A5\u5319\u788E\u7247"
       inputs:
       - ItemId: 3
         Count: 2
@@ -73,7 +73,7 @@ MonoBehaviour:
       timeSeconds: 6
       machineType: 1
       allowHandCraft: 0
-      batchLimit: 0
+      batchLimit: 1
       consumeInputsAtStart: 0
       unlockTier: 0
       unlockedByDefault: 0
@@ -81,21 +81,21 @@ MonoBehaviour:
       tags: []
       energyCost: 0
       xpReward: 0
-  - description: "\u5408\u6210\u5730\u4E0B\u94A5\u5319"
+  - description: 
     definition:
       id: 403
       codeName: KeyFragment_To_DungeonKey
       displayName: "\u5408\u6210\u5730\u4E0B\u94A5\u5319"
       inputs:
       - ItemId: 5
-        Count: 4
+        Count: 2
       outputs:
       - ItemId: 6
         Count: 1
       timeSeconds: 8
       machineType: 1
       allowHandCraft: 0
-      batchLimit: 0
+      batchLimit: 1
       consumeInputsAtStart: 0
       unlockTier: 0
       unlockedByDefault: 0

@@ -6,7 +6,7 @@ namespace Game.Data.Definition.Recipes
 {
     [CustomConfig]
     [CreateAssetMenu(fileName = "BaseRecipeSection", menuName = "Game/Definition/Recipes/BaseRecipeSection", order = 0)]
-    public class BaseRecipeSection : DefinitionSectionBase<BaseRecipeDefinition>
+    public partial class BaseRecipeSection : DefinitionSectionBase<BaseRecipeDefinition>
     {
         public override string SectionName => "BaseRecipeSection";
     }

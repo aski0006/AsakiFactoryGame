@@ -19,20 +19,20 @@ namespace Game.Data.Definition.Items
     ///   修改 codeName / Id 会影响生成常量与存档兼容，应走迁移流程。
     /// </summary>
     [Serializable]
-    [CsvDefinition(ArraySeparator = ';')]
+    [CsvDefinition]
     public partial class BaseItemDefinition : IDefinition
     {
         #region Core Identity
 
-        [CsvField("id", Required = true)]
+        [CsvField("id", remark: "唯一ID", Required = true)]
         [SerializeField, Tooltip("全局唯一 Id（>0）。生成常量引用 ConfigIds.ItemDefinition.X")]
         private int id;
 
-        [CsvField("codeName", Required = true)]
+        [CsvField("codeName", remark: "内部代码名", Required = true)]
         [SerializeField, Tooltip("内部代码名（稳定标识）")]
         private string codeName;
 
-        [CsvField("displayName")]
+        [CsvField("displayName", remark: "显示名称")]
         [SerializeField, Tooltip("展示名称（可本地化）。")]
         private string displayName;
 
@@ -40,15 +40,15 @@ namespace Game.Data.Definition.Items
 
         #region Classification
 
-        [CsvField("category")]
+        [CsvField("category", remark: "物品分类")]
         [SerializeField, Tooltip("物品分类")]
         private ItemCategory category = ItemCategory.Resource;
 
-        [CsvField("rarity")]
+        [CsvField("rarity", remark: "稀有度")]
         [SerializeField, Tooltip("稀有度")]
         private ItemRarity rarity = ItemRarity.Common;
 
-        [CsvField("sortOrder")]
+        [CsvField("sortOrder", remark: "排序权重")]
         [SerializeField, Tooltip("排序权重")]
         private int sortOrder = 0;
 
@@ -56,15 +56,15 @@ namespace Game.Data.Definition.Items
 
         #region Stack & Handling
 
-        [CsvField("maxStack")]
+        [CsvField("maxStack", remark: "最大堆叠")]
         [SerializeField, Min(1), Tooltip("最大堆叠")]
         private int maxStack = 100;
 
-        [CsvField("droppable")]
+        [CsvField("droppable", remark: "可丢弃")]
         [SerializeField, Tooltip("是否可丢弃")]
         private bool droppable = true;
 
-        [CsvField("storable")]
+        [CsvField("storable", remark: "可进通用背包")]
         [SerializeField, Tooltip("是否可放入通用背包")]
         private bool storable = true;
 
@@ -72,11 +72,11 @@ namespace Game.Data.Definition.Items
 
         #region Economy
 
-        [CsvField("baseValue")]
+        [CsvField("baseValue", remark: "基础价值")]
         [SerializeField, Tooltip("基础价值")]
         private int baseValue = 0;
 
-        [CsvField("unlockTier")]
+        [CsvField("unlockTier", remark: "解锁层级")]
         [SerializeField, Tooltip("解锁层级")]
         private int unlockTier = 0;
 
@@ -84,11 +84,11 @@ namespace Game.Data.Definition.Items
 
         #region Visual
 
-        [CsvField("iconGuid", AssetMode = AssetRefMode.Guid)]
+        [CsvField("iconGuid", remark: "图标GUID", AssetMode = AssetRefMode.Guid)]
         [SerializeField, Tooltip("主图标")]
         private Sprite icon;
 
-        [CsvField("description")]
+        [CsvField("description", remark: "描述")]
         [SerializeField, TextArea(2, 4), Tooltip("描述文本")]
         private string description;
 
@@ -96,7 +96,7 @@ namespace Game.Data.Definition.Items
 
         #region Tags
 
-        [CsvField("tags")] // 使用 CsvDefinition(ArraySeparator=';') 的默认分隔
+        [CsvField("tags", remark: "标签(分号;分隔)", CustomArraySeparator = ";")] // 使用 CsvDefinition(ArraySeparator=';') 的默认分隔
         [SerializeField, Tooltip("标签列表")]
         private string[] tags;
 

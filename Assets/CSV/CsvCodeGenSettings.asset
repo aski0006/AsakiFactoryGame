@@ -12,6 +12,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9df03c56d1374e4c9a511080f74c7f12, type: 3}
   m_Name: CsvCodeGenSettings
   m_EditorClassIdentifier: 
-  outputFolder: Assets/Generated/CsvBindings
+  outputFolder: Assets/Scripts/Generated/CsvBindings
   verbose: 1
   generateEditorSetters: 1

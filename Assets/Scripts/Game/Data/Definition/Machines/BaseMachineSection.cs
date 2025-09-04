@@ -6,7 +6,7 @@ namespace Game.Data.Definition.Machines
 {
     [CustomConfig]
     [CreateAssetMenu(fileName = "BaseMachineSection", menuName = "Game/Definition/Machines/BaseMachineSection", order = 0)]
-    public class BaseMachineSection : DefinitionSectionBase<BaseMachineDefinition>
+    public partial class BaseMachineSection : DefinitionSectionBase<BaseMachineDefinition>
     {
         override public string SectionName => "BaseMachineSection";
     }

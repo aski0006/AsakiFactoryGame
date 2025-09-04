@@ -1,0 +1,5 @@
+id,codeName,displayName,inputs,outputs,timeSeconds,machineType,allowHandCraft,batchLimit,consumeInputsAtStart,unlockTier,unlockedByDefault,description,tags,energyCost,xpReward
+400,Wood_To_WoodPlank,木材制木板,1:1,3:3,2,Assembler,false,1,false,0,false,将木材加工为木板。,,0,0
+401,CopperOre_To_CopperIngot,冶炼铜锭,2:1,4:2,4,Furnace,false,1,false,0,false,冶炼获得铜锭。,,0,0
+402,PlankIngot_To_KeyFragment,合成地下钥匙碎片,"3:2,4:1",5:1,6,Assembler,false,1,false,0,false,组合材料得到钥匙碎片。,,0,0
+403,KeyFragment_To_DungeonKey,合成地下钥匙,5:2,6:1,8,Assembler,false,1,false,0,false,组合碎片得到进入副本的钥匙。,,0,0

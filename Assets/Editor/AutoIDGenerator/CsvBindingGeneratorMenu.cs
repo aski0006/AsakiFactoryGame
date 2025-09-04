@@ -1,7 +1,6 @@
 ﻿#if UNITY_EDITOR
 using Game.CSV;
 using Game.Data.Core;
-using Game.ScriptableObjectDB.CSV;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -10,22 +9,13 @@ using System.Reflection;
 using System.Text;
 using UnityEditor;
 using UnityEngine;
-// 引用 ICsvImportableConfig / ICsvExportableConfig
-
-// DefinitionSectionBase
 
 namespace Editor.AutoIDGenerator
 {
-    /// <summary>
-    /// 菜单式 CSV 代码生成器（Unity 不支持 Roslyn Source Generator 时使用）。
-    /// 逻辑：
-    /// 1. 查找所有打了 [CsvDefinition] 的类型。
-    /// 2. 收集字段上 [CsvField] 元数据。
-    /// 3. 生成：Definition Binding + (可选) Section Adapter + (可选) Editor Setter partial。
-    /// </summary>
     public static class CsvBindingGeneratorMenu
     {
-        private const string DefaultOutputDir = "Assets/Generated/CsvBindings";
+        private const string DefaultOutputDir = "Assets/Scripts/Generated/CsvBindings";
+        private const string ManifestFileName = "CsvGenManifest.xml";
 
         [MenuItem("Tools/Core Generator/CSV Generate Bindings")]
         public static void Generate()
@@ -34,6 +24,11 @@ namespace Editor.AutoIDGenerator
             var settings = LoadSettings();
             var outputDir = string.IsNullOrEmpty(settings?.outputFolder) ? DefaultOutputDir : settings.outputFolder;
             Directory.CreateDirectory(outputDir);
+
+            // Manifest 读入
+            var manifestPath = Path.Combine(outputDir, ManifestFileName);
+            var manifest = CsvGenManifest.Load(manifestPath);
+            var newManifest = new CsvGenManifest();
 
             var asmList = AppDomain.CurrentDomain.GetAssemblies();
             var allTypes = new List<Type>();
@@ -49,7 +44,8 @@ namespace Editor.AutoIDGenerator
                 .Where(t => !t.IsAbstract && t.GetCustomAttribute<CsvDefinitionAttribute>() != null)
                 .ToList();
 
-            int generatedFiles = 0;
+            int generatedOrUpdated = 0;
+            int skipped = 0;
             var logBuilder = new StringBuilder();
 
             foreach (var defType in csvDefTypes)
@@ -68,17 +64,23 @@ namespace Editor.AutoIDGenerator
                         continue;
                     }
 
-                    // 生成 Binding
+                    // Binding
                     var bindingCode = GenerateDefinitionBinding(defType, fieldInfos, defAttr, settings);
                     var bindingPath = Path.Combine(outputDir, $"{defType.Name}_CsvBinding.g.cs");
-                    generatedFiles += WriteFileIfChanged(bindingPath, bindingCode);
+                    if (WriteFileIfChangedIncremental(bindingPath, bindingCode, manifest, newManifest, settings))
+                        generatedOrUpdated++;
+                    else
+                        skipped++;
 
-                    // 生成 Editor Setter partial（可选）
+                    // Editor Setter partial
                     if (settings == null || settings.generateEditorSetters)
                     {
                         var setterCode = GenerateEditorSetterPartial(defType, fieldInfos);
                         var setterPath = Path.Combine(outputDir, $"{defType.Name}_CsvSetters.g.cs");
-                        generatedFiles += WriteFileIfChanged(setterPath, setterCode);
+                        if (WriteFileIfChangedIncremental(setterPath, setterCode, manifest, newManifest, settings))
+                            generatedOrUpdated++;
+                        else
+                            skipped++;
                     }
 
                     // Section Adapter
@@ -89,7 +91,10 @@ namespace Editor.AutoIDGenerator
                         {
                             var adapterCode = GenerateSectionAdapter(defType, sectionType);
                             var adapterPath = Path.Combine(outputDir, $"{sectionType.Name}_CsvAdapter.g.cs");
-                            generatedFiles += WriteFileIfChanged(adapterPath, adapterCode);
+                            if (WriteFileIfChangedIncremental(adapterPath, adapterCode, manifest, newManifest, settings))
+                                generatedOrUpdated++;
+                            else
+                                skipped++;
                         }
                     }
 
@@ -101,9 +106,36 @@ namespace Editor.AutoIDGenerator
                 }
             }
 
+            // 删除陈旧文件
+            if (settings == null || settings.deleteStaleFiles)
+            {
+                var newSet = new HashSet<string>(newManifest.Files.Select(f => f.FilePath), StringComparer.OrdinalIgnoreCase);
+                foreach (var old in manifest.Files)
+                {
+                    if (!newSet.Contains(old.FilePath))
+                    {
+                        try
+                        {
+                            if (File.Exists(old.FilePath))
+                            {
+                                File.Delete(old.FilePath);
+                                logBuilder.AppendLine($"[CSVGen] 删除陈旧文件 {old.FilePath}");
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            Debug.LogWarning($"[CSVGen] 删除文件失败 {old.FilePath}: {ex.Message}");
+                        }
+                    }
+                }
+            }
+
+            // 保存新 manifest
+            newManifest.Save(manifestPath);
+
             AssetDatabase.Refresh();
             sw.Stop();
-            Debug.Log($"[CSVGen] 完成 生成/更新文件数={generatedFiles} 耗时={sw.ElapsedMilliseconds}ms\n{logBuilder}");
+            Debug.Log($"[CSVGen] 完成。生成/更新={generatedOrUpdated} 跳过(未变化)={skipped} 耗时={sw.ElapsedMilliseconds}ms\n{logBuilder}");
         }
 
         private static CsvCodeGenSettings LoadSettings()
@@ -113,18 +145,36 @@ namespace Editor.AutoIDGenerator
             return AssetDatabase.LoadAssetAtPath<CsvCodeGenSettings>(AssetDatabase.GUIDToAssetPath(guids[0]));
         }
 
-        private static int WriteFileIfChanged(string path, string content)
+        #region Incremental Helpers
+        private static bool WriteFileIfChangedIncremental(string path, string content, CsvGenManifest oldManifest, CsvGenManifest newManifest, CsvCodeGenSettings settings)
         {
-            if (File.Exists(path))
+            var hash = CsvGenManifest.ComputeHash(content);
+            var oldEntry = oldManifest.Find(path);
+            if (oldEntry != null && oldEntry.Hash == hash && (settings == null || settings.incremental))
             {
-                var old = File.ReadAllText(path, Encoding.UTF8);
-                if (old == content)
-                    return 0;
+                // 保留旧 entry
+                newManifest.Files.Add(new CsvGenManifestEntry { FilePath = path, Hash = hash, TypeFullName = oldEntry.TypeFullName });
+                return false; // 未写入
             }
-            File.WriteAllText(path, content, new UTF8Encoding(false));
-            return 1;
-        }
 
+            var oldExists = File.Exists(path) ? File.ReadAllText(path, Encoding.UTF8) : null;
+            if (oldExists != content)
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(path) ?? ".");
+                File.WriteAllText(path, content, new UTF8Encoding(false));
+            }
+
+            newManifest.Files.Add(new CsvGenManifestEntry
+            {
+                FilePath = path,
+                Hash = hash,
+                TypeFullName = "" // 可选：记录 defType.FullName
+            });
+            return true;
+        }
+        #endregion
+
+        #region Reflection Helpers
         private static IEnumerable<Type> FindSectionTypesForDefinition(List<Type> allTypes, Type defType)
         {
             return allTypes.Where(t =>
@@ -149,6 +199,7 @@ namespace Editor.AutoIDGenerator
             }
             return false;
         }
+        #endregion
 
         #region Binding Generation
 
@@ -160,6 +211,8 @@ namespace Editor.AutoIDGenerator
         {
             var ns = string.IsNullOrEmpty(defType.Namespace) ? "GlobalNamespace" : defType.Namespace;
             var headerCols = new List<string>();
+            var remarkCols = new List<string>();
+
             foreach (var f in fields)
             {
                 var meta = f.GetCustomAttribute<CsvFieldAttribute>();
@@ -167,7 +220,10 @@ namespace Editor.AutoIDGenerator
                 if (headerCols.Contains(col))
                     Debug.LogWarning($"[CSVGen] 重复列名 {col} in {defType.Name}");
                 headerCols.Add(col);
+                remarkCols.Add(meta.Remark ?? "");
             }
+
+            char kvSep = settings != null ? settings.defaultKeyValueSeparator : ':'; // 字典 key-value 分隔符
 
             var sb = new StringBuilder();
             sb.AppendLine("// <auto-generated />");
@@ -177,8 +233,6 @@ namespace Editor.AutoIDGenerator
             sb.AppendLine("using System.Collections.Generic;");
             sb.AppendLine("using UnityEngine;");
             sb.AppendLine("using System.Linq;");
-#if UNITY_EDITOR
-#endif
             sb.AppendLine("using Game.CSV;");
             sb.AppendLine($"namespace {ns} {{");
             sb.AppendLine($"internal static class CsvBinding_{defType.Name}");
@@ -188,8 +242,18 @@ namespace Editor.AutoIDGenerator
             sb.AppendLine("    internal static readonly string[] Header = new[]{");
             for (int i = 0; i < headerCols.Count; i++)
             {
-                sb.Append("        \"").Append(headerCols[i]).Append("\"");
+                sb.Append("        \"").Append(EscapeString(headerCols[i])).Append("\"");
                 if (i < headerCols.Count - 1) sb.Append(",");
+                sb.AppendLine();
+            }
+            sb.AppendLine("    };");
+
+            // Remarks
+            sb.AppendLine("    internal static readonly string[] Remarks = new[]{");
+            for (int i = 0; i < remarkCols.Count; i++)
+            {
+                sb.Append("        \"").Append(EscapeString(remarkCols[i])).Append("\"");
+                if (i < remarkCols.Count - 1) sb.Append(",");
                 sb.AppendLine();
             }
             sb.AppendLine("    };");
@@ -202,7 +266,7 @@ namespace Editor.AutoIDGenerator
             {
                 var meta = f.GetCustomAttribute<CsvFieldAttribute>();
                 if (meta.IgnoreExport) continue;
-                sb.AppendLine(GenerateExportLine(defType, f, meta, defAttr));
+                sb.AppendLine(GenerateExportLine(defType, f, meta, defAttr, kvSep));
             }
             sb.AppendLine("        return d;");
             sb.AppendLine("    }");
@@ -215,7 +279,7 @@ namespace Editor.AutoIDGenerator
             {
                 var meta = f.GetCustomAttribute<CsvFieldAttribute>();
                 if (meta.IgnoreImport) continue;
-                sb.AppendLine(GenerateImportLines(defType, f, meta, defAttr));
+                sb.AppendLine(GenerateImportLines(defType, f, meta, defAttr, kvSep));
             }
             sb.AppendLine("    }");
             sb.AppendLine("#endif");
@@ -223,6 +287,12 @@ namespace Editor.AutoIDGenerator
             sb.AppendLine("}"); // class
             sb.AppendLine("}"); // ns
             return sb.ToString();
+        }
+
+        private static string EscapeString(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return "";
+            return s.Replace("\\", "\\\\").Replace("\"", "\\\"");
         }
 
         private static string GetColumnName(FieldInfo fi, CsvFieldAttribute meta)
@@ -234,29 +304,80 @@ namespace Editor.AutoIDGenerator
             return fi.Name;
         }
 
-        private static string GenerateExportLine(Type defType, FieldInfo fi, CsvFieldAttribute meta, CsvDefinitionAttribute defAttr)
+        private static bool IsListLike(Type t, out Type elemType)
+        {
+            elemType = null;
+            if (t.IsArray)
+            {
+                elemType = t.GetElementType();
+                return true;
+            }
+            if (t.IsGenericType)
+            {
+                var td = t.GetGenericTypeDefinition();
+                if (td == typeof(List<>) || td == typeof(IReadOnlyList<>))
+                {
+                    elemType = t.GetGenericArguments()[0];
+                    return true;
+                }
+            }
+            // 接口实现 IReadOnlyList<>
+            var iface = t.GetInterfaces().FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IReadOnlyList<>));
+            if (iface != null)
+            {
+                elemType = iface.GetGenericArguments()[0];
+                return true;
+            }
+            return false;
+        }
+
+        private static bool IsDictionaryLike(Type t, out Type keyType, out Type valueType)
+        {
+            keyType = null;
+            valueType = null;
+            if (t.IsGenericType)
+            {
+                var td = t.GetGenericTypeDefinition();
+                if (td == typeof(Dictionary<,>) || td == typeof(IReadOnlyDictionary<,>))
+                {
+                    var args = t.GetGenericArguments();
+                    keyType = args[0];
+                    valueType = args[1];
+                    return true;
+                }
+            }
+            // 接口实现
+            var iface = t.GetInterfaces().FirstOrDefault(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IReadOnlyDictionary<,>));
+            if (iface != null)
+            {
+                var args = iface.GetGenericArguments();
+                keyType = args[0];
+                valueType = args[1];
+                return true;
+            }
+            return false;
+        }
+
+        private static string GenerateExportLine(Type defType, FieldInfo fi, CsvFieldAttribute meta, CsvDefinitionAttribute defAttr, char kvSep)
         {
             string col = GetColumnName(fi, meta);
             string propGuess = GuessPublicPropertyName(fi);
             var t = fi.FieldType;
+
             if (t == typeof(string))
                 return $"        d[\"{col}\"] = {InstanceExpr(propGuess, fi)} ?? \"\";";
-            if (t == typeof(int) || t == typeof(float) || t == typeof(double) || t == typeof(long) ||
-                t.IsEnum)
+            if (t == typeof(int) || t == typeof(float) || t == typeof(double) || t == typeof(long) || t.IsEnum)
                 return $"        d[\"{col}\"] = {InstanceExpr(propGuess, fi)}.ToString();";
             if (t == typeof(bool))
                 return $"        d[\"{col}\"] = {InstanceExpr(propGuess, fi)} ? \"true\" : \"false\";";
-
             if (t == typeof(string[]))
             {
                 var sep = string.IsNullOrEmpty(meta.CustomArraySeparator) ? defAttr.ArraySeparator : meta.CustomArraySeparator[0];
                 return $"        d[\"{col}\"] = {InstanceExpr(propGuess, fi)} != null ? string.Join(\"{sep}\", {InstanceExpr(propGuess, fi)}) : \"\";";
             }
-
             if (t == typeof(Sprite) && meta.AssetMode == AssetRefMode.Guid)
             {
-                return
-@"#if UNITY_EDITOR
+                return @"#if UNITY_EDITOR
         if (" + InstanceExpr(propGuess, fi) + @" != null) {
             var p = AssetDatabase.GetAssetPath(" + InstanceExpr(propGuess, fi) + @");
             d[""" + col + @"""] = string.IsNullOrEmpty(p) ? """" : AssetDatabase.AssetPathToGUID(p);
@@ -266,19 +387,80 @@ namespace Editor.AutoIDGenerator
 #endif";
             }
 
-            // Fallback
-            return $"        d[\"{col}\"] = {InstanceExpr(propGuess, fi)} != null ? {InstanceExpr(propGuess, fi)}.ToString() : \"\";";
+            if (IsDictionaryLike(t, out var kType, out var vType))
+            {
+                var entrySep = string.IsNullOrEmpty(meta.CustomArraySeparator) ? defAttr.ArraySeparator : meta.CustomArraySeparator[0];
+                // 排序（如键可排序）保证稳定输出
+                string orderLine = kType.GetInterface(nameof(IComparable)) != null || kType.IsPrimitive || kType.IsEnum
+                    ? "var __ordered = dict.Keys.OrderBy(_k => _k).ToList();"
+                    : "var __ordered = dict.Keys.ToList();";
+
+                return
+$@"        {{
+            var dict = {InstanceExpr(propGuess, fi)} as System.Collections.Generic.IReadOnlyDictionary<{kType.FullName},{vType.FullName}>;
+            if (dict == null || dict.Count == 0) d[""{col}""] = """";
+            else {{
+                {orderLine}
+                System.Text.StringBuilder __sb = new System.Text.StringBuilder();
+                for (int __i=0; __i<__ordered.Count; __i++)
+                {{
+                    var __k = __ordered[__i];
+                    var __v = dict[__k];
+                    string __ks, __vs;
+                    if (!CsvTypeConverterRegistry.TrySerialize(typeof({kType.FullName}), __k, out __ks)) __ks = __k != null ? __k.ToString() : """";
+                    if (!CsvTypeConverterRegistry.TrySerialize(typeof({vType.FullName}), __v, out __vs)) __vs = __v != null ? __v.ToString() : """";
+                    if (__i>0) __sb.Append('{entrySep}');
+                    __sb.Append(__ks).Append('{kvSep}').Append(__vs);
+                }}
+                d[""{col}""] = __sb.ToString();
+            }}
+        }}";
+            }
+
+            if (IsListLike(t, out var elemType))
+            {
+                var sepChar = string.IsNullOrEmpty(meta.CustomArraySeparator) ? defAttr.ArraySeparator : meta.CustomArraySeparator[0];
+                return
+$@"        {{
+            var __list = {InstanceExpr(propGuess, fi)} as System.Collections.Generic.IReadOnlyList<{elemType.FullName}>;
+            if (__list == null || __list.Count == 0) d[""{col}""] = """";
+            else {{
+                System.Text.StringBuilder __sb = new System.Text.StringBuilder();
+                for (int __i = 0; __i < __list.Count; __i++)
+                {{
+                    var __e = __list[__i];
+                    string __s;
+                    if (CsvTypeConverterRegistry.TrySerialize(typeof({elemType.FullName}), __e, out __s))
+                    {{
+                        if (__i > 0) __sb.Append('{sepChar}');
+                        __sb.Append(__s);
+                    }}
+                    else
+                    {{
+                        if (__i > 0) __sb.Append('{sepChar}');
+                        __sb.Append(__e != null ? __e.ToString() : """");
+                    }}
+                }}
+                d[""{col}""] = __sb.ToString();
+            }}
+        }}";
+            }
+
+            // 单值自定义类型
+            return
+$@"        {{
+            string __custom;
+            if (CsvTypeConverterRegistry.TrySerialize(typeof({t.FullName}), {InstanceExpr(propGuess, fi)}, out __custom))
+                d[""{col}""] = __custom ?? """";
+            else
+                d[""{col}""] = {InstanceExpr(propGuess, fi)} != null ? {InstanceExpr(propGuess, fi)}.ToString() : """";
+        }}";
         }
 
-        private static string InstanceExpr(string propGuess, FieldInfo fi)
-        {
-            // 优先尝试公开属性(只读) - 若无则反射时也可以内部 setter；导出只读属性足够
-            return $"def.{propGuess}";
-        }
+        private static string InstanceExpr(string propGuess, FieldInfo fi) => $"def.{propGuess}";
 
         private static string GuessPublicPropertyName(FieldInfo fi)
         {
-            // 简单假设：private int id; 对应 public int Id => id;
             var n = fi.Name;
             if (n.Length == 0) return n;
             if (char.IsLower(n[0]))
@@ -286,16 +468,18 @@ namespace Editor.AutoIDGenerator
             return n;
         }
 
-        private static string GenerateImportLines(Type defType, FieldInfo fi, CsvFieldAttribute meta, CsvDefinitionAttribute defAttr)
+        private static string GenerateImportLines(Type defType, FieldInfo fi, CsvFieldAttribute meta, CsvDefinitionAttribute defAttr, char kvSep)
         {
             var col = GetColumnName(fi, meta);
             var setterName = $"__CsvSet_{fi.Name}";
             var fieldType = fi.FieldType;
             var sb = new StringBuilder();
-
             string localVar = $"v_{fi.Name}";
+
             sb.AppendLine($"        if (row.TryGetValue(\"{col}\", out var {localVar}))");
             sb.AppendLine("        {");
+            sb.AppendLine($"            if ({localVar} == null) {localVar} = string.Empty;");
+
             if (fieldType == typeof(string))
             {
                 if (meta.AllowEmptyOverwrite)
@@ -339,19 +523,96 @@ $@"            var arr = string.IsNullOrWhiteSpace({localVar})
             }
             else target." + setterName + "(null);");
             }
+            else if (IsDictionaryLike(fieldType, out var kType, out var vType))
+            {
+                var sep = string.IsNullOrEmpty(meta.CustomArraySeparator) ? defAttr.ArraySeparator : meta.CustomArraySeparator[0];
+                sb.AppendLine(
+$@"            if (string.IsNullOrWhiteSpace({localVar})) {{
+                target.{setterName}(new System.Collections.Generic.Dictionary<{kType.FullName},{vType.FullName}>());
+            }} else {{
+                var _parts = {localVar}.Split(new[]{{'{sep}'}}, StringSplitOptions.RemoveEmptyEntries);
+                var _dict = new System.Collections.Generic.Dictionary<{kType.FullName},{vType.FullName}>(_parts.Length);
+                for (int __i=0; __i<_parts.Length; __i++)
+                {{
+                    var __token = _parts[__i].Trim();
+                    int __sepIdx = __token.IndexOf('{kvSep}');
+                    if (__sepIdx <= 0 || __sepIdx >= __token.Length-1) continue;
+                    var __ks = __token.Substring(0, __sepIdx).Trim();
+                    var __vs = __token.Substring(__sepIdx+1).Trim();
+                    object __kObj, __vObj;
+                    // 解析键
+                    if (!CsvTypeConverterRegistry.TryDeserialize(typeof({kType.FullName}), __ks, out __kObj))
+                    {{
+                        __kObj = TryParsePrimitive<{kType.FullName}>(__ks, out var __kPrim) ? (object)__kPrim :
+                                 (typeof({kType.FullName}) == typeof(string) ? (object)__ks : null);
+                    }}
+                    // 解析值
+                    if (!CsvTypeConverterRegistry.TryDeserialize(typeof({vType.FullName}), __vs, out __vObj))
+                    {{
+                        __vObj = TryParsePrimitive<{vType.FullName}>(__vs, out var __vPrim) ? (object)__vPrim :
+                                 (typeof({vType.FullName}) == typeof(string) ? (object)__vs : null);
+                    }}
+                    if (__kObj is {kType.FullName} __kC && __vObj is {vType.FullName} __vC)
+                    {{
+                        if(!_dict.ContainsKey(__kC))
+                            _dict.Add(__kC, __vC);
+                    }}
+                }}
+                target.{setterName}(_dict);
+            }}");
+            }
+            else if (IsListLike(fieldType, out var elemType))
+            {
+                var sep = string.IsNullOrEmpty(meta.CustomArraySeparator) ? defAttr.ArraySeparator : meta.CustomArraySeparator[0];
+                sb.AppendLine(
+$@"            if (string.IsNullOrWhiteSpace({localVar})) {{
+                target.{setterName}(System.Array.Empty<{elemType.FullName}>());
+            }} else {{
+                var _parts = {localVar}.Split(new[]{{'{sep}'}}, StringSplitOptions.RemoveEmptyEntries);
+                var _list = new System.Collections.Generic.List<{elemType.FullName}>(_parts.Length);
+                for (int __i = 0; __i < _parts.Length; __i++)
+                {{
+                    var __token = _parts[__i].Trim();
+                    if (CsvTypeConverterRegistry.TryDeserialize(typeof({elemType.FullName}), __token, out var __obj))
+                    {{
+                        _list.Add( ({elemType.FullName})__obj );
+                    }}
+                    else
+                    {{
+                        if (TryParsePrimitive<{elemType.FullName}>(__token, out var __prim))
+                            _list.Add(__prim);
+                        else if (typeof({elemType.FullName}) == typeof(string))
+                            _list.Add( ( {elemType.FullName} )(object)__token );
+                        // 否则忽略
+                    }}
+                }}
+                target.{setterName}(_list.ToArray());
+            }}");
+            }
             else
             {
-                sb.AppendLine($"            // Unsupported type {fieldType.FullName} (忽略)");
+                sb.AppendLine(
+$@"            if (CsvTypeConverterRegistry.TryDeserialize(typeof({fieldType.FullName}), {localVar}, out var __boxed))
+            {{
+                target.{setterName}( ({fieldType.FullName})__boxed );
+            }}
+            else if (TryParsePrimitive<{fieldType.FullName}>({localVar}, out var __prim))
+            {{
+                target.{setterName}(__prim);
+            }}
+            else if (typeof({fieldType.FullName}) == typeof(string) && !string.IsNullOrEmpty({localVar}))
+            {{
+                target.{setterName}(({fieldType.FullName})(object){localVar});
+            }}");
             }
 
             sb.AppendLine("        }");
+            // 附加 TryParsePrimitive<T> 静态泛型方法只生成一次可放最下面，这里简化放 Section Adapter 内或 Binding 末尾
             return sb.ToString();
         }
-
         #endregion
 
         #region Section Adapter
-
         private static string GenerateSectionAdapter(Type defType, Type sectionType)
         {
             var ns = string.IsNullOrEmpty(sectionType.Namespace) ? "GlobalNamespace" : sectionType.Namespace;
@@ -360,16 +621,17 @@ $@"            var arr = string.IsNullOrWhiteSpace({localVar})
             sb.AppendLine("#nullable enable");
             sb.AppendLine("using System;");
             sb.AppendLine("using System.Collections.Generic;");
-            sb.AppendLine("using Game.ScriptableObjectDB.CSV;");
             sb.AppendLine("using Game.CSV;");
+            sb.AppendLine("using UnityEngine;");
             sb.AppendLine("#if UNITY_EDITOR");
             sb.AppendLine("using UnityEditor;");
             sb.AppendLine("#endif");
             sb.AppendLine($"namespace {ns} {{");
-            sb.AppendLine($"public partial class {sectionType.Name} : ICsvImportableConfig, ICsvExportableConfig");
+            sb.AppendLine($"public partial class {sectionType.Name} : ICsvImportableConfig, ICsvExportableConfig, ICsvRemarkProvider");
             sb.AppendLine("{");
             sb.AppendLine("    public IReadOnlyList<string> GetExpectedColumns() => CsvBinding_" + defType.Name + ".Header;");
             sb.AppendLine("    public IReadOnlyList<string> GetCsvHeader() => CsvBinding_" + defType.Name + ".Header;");
+            sb.AppendLine("    public IReadOnlyList<string> GetCsvRemarks() => CsvBinding_" + defType.Name + ".Remarks;");
             sb.AppendLine("    public void PrepareForCsvImport(bool clearExisting)");
             sb.AppendLine("    {");
             sb.AppendLine("#if UNITY_EDITOR");
@@ -429,15 +691,69 @@ $@"            var arr = string.IsNullOrWhiteSpace({localVar})
             sb.AppendLine("        }");
             sb.AppendLine("    }");
 
+            sb.AppendLine("    public void ExportCsv(string path, bool utf8Bom = true)");
+            sb.AppendLine("    {");
+            sb.AppendLine("        var header = CsvBinding_" + defType.Name + ".Header;");
+            sb.AppendLine("        var remarks = CsvBinding_" + defType.Name + ".Remarks;");
+            sb.AppendLine("        var rows = ExportCsvRows();");
+            sb.AppendLine("        CsvExportUtility.Write(path, header, rows, remarks, utf8Bom);");
+            sb.AppendLine("#if UNITY_EDITOR");
+            sb.AppendLine("        Debug.Log($\"[CSVGen] 导出完成: {path}\");");
+            sb.AppendLine("#endif");
+            sb.AppendLine("    }");
+
+            // 工具：TryParsePrimitive<T>
+            sb.AppendLine(@"    private static bool TryParsePrimitive<T>(string s, out T v)
+    {
+        v = default;
+        if (string.IsNullOrWhiteSpace(s)) return false;
+        var target = typeof(T);
+        try
+        {
+            if (target == typeof(int))
+            {
+                if (int.TryParse(s, out var iv)) { v = (T)(object)iv; return true; }
+                return false;
+            }
+            if (target == typeof(float))
+            {
+                if (float.TryParse(s, out var fv)) { v = (T)(object)fv; return true; }
+                return false;
+            }
+            if (target == typeof(double))
+            {
+                if (double.TryParse(s, out var dv)) { v = (T)(object)dv; return true; }
+                return false;
+            }
+            if (target == typeof(long))
+            {
+                if (long.TryParse(s, out var lv)) { v = (T)(object)lv; return true; }
+                return false;
+            }
+            if (target == typeof(bool))
+            {
+                if (bool.TryParse(s, out var bv)) { v = (T)(object)bv; return true; }
+                if (s == ""1"") { v = (T)(object)true; return true; }
+                if (s == ""0"") { v = (T)(object)false; return true; }
+                return false;
+            }
+            if (target.IsEnum)
+            {
+                if (Enum.TryParse(target, s, true, out var ev)) { v = (T)ev; return true; }
+                return false;
+            }
+        }
+        catch { return false; }
+        return false;
+    }");
+
             sb.AppendLine("}"); // class
             sb.AppendLine("}"); // ns
             return sb.ToString();
         }
-
         #endregion
 
         #region Editor Setter Partial
-
         private static string GenerateEditorSetterPartial(Type defType, List<FieldInfo> fields)
         {
             var ns = string.IsNullOrEmpty(defType.Namespace) ? "GlobalNamespace" : defType.Namespace;
@@ -460,10 +776,8 @@ $@"            var arr = string.IsNullOrWhiteSpace({localVar})
         private static string GetFriendlyTypeName(Type t)
         {
             if (!t.IsGenericType) return t.FullName?.Replace("+", ".") ?? t.Name;
-            // 不做复杂处理（本项目字段类型简单）
             return t.FullName?.Replace("+", ".") ?? t.Name;
         }
-
         #endregion
     }
 }
