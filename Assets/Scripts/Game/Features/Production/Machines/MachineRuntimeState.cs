@@ -1,5 +1,5 @@
-﻿using System.Collections.Generic;
-using Game.Data.Definition.Machines;
+﻿using Game.Data.Definition.Machines;
+using System.Collections.Generic;
 
 namespace Game.Features.Production.Machines
 {

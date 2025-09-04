@@ -1,6 +1,6 @@
-﻿using System;
+﻿using Game.Data.Definition.Recipes;
+using System;
 using Game.Features.Production.Machines;
-using Game.Data.Definition.Recipes;
 
 namespace Game.Features.Production.Processing
 {

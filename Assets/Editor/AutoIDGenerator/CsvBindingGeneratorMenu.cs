@@ -176,6 +176,7 @@ namespace Editor.AutoIDGenerator
             sb.AppendLine("using System;");
             sb.AppendLine("using System.Collections.Generic;");
             sb.AppendLine("using UnityEngine;");
+            sb.AppendLine("using System.Linq;");
 #if UNITY_EDITOR
 #endif
             sb.AppendLine("using Game.CSV;");
