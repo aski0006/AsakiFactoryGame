@@ -20,6 +20,13 @@ namespace Game.Save
     /// - 支持延迟 Restore（方案B）
     /// - 增加快照有效性 / 空写防护 / 未变化跳过 / 首次恢复前禁止自动保存 等安全策略
     /// - 同步与异步保存统一使用收集逻辑，并仅在真正写盘后清除 Dirty
+    ///
+    /// PATCH 2025-09-04:
+    /// 修复问题：增量保存时，未 Dirty 的 Provider 没被 Capture，
+    ///           导致其 Section 不被新快照包含，从而“丢失”之前的存档数据（背包消失）。
+    /// 方案：CollectSections 时对未脏（且已有旧 Section）的 Provider 复制旧 Section 进入新快照。
+    ///       仅当 Provider 是 Dirty 且 Capture 结果为 null 时才真正移除。
+    ///       这样保证“增量保存”是覆盖+保留，而不是“重建仅脏部分”。
     /// </summary>
     public class SaveManager : MonoBehaviour, SingletonInterfaces.ISyncInitialize
     {
@@ -492,61 +499,127 @@ namespace Game.Save
         /// <summary>是否允许继续保存。</summary>
         private bool CanProceedSave(bool isManual)
         {
-            // 没有加载任何存档（且不是手动）时，允许创建首个存档？—— 依据策略：
-            // 如果不允许，在此可 return false；目前允许，即不阻止 _loaded=false 场景的第一次保存。
-            // 但可以加一个策略：首次自动保存需满足最少 Provider 数等，可扩展。
             if (!_loaded && !isManual && config.forbidAutoSaveBeforeFirstRestore)
             {
-                // 仍未恢复成功，避免写出初次空快照
                 if (!_firstRestoreCompleted)
+                {
+                    FastString.Acquire().Tag("SaveManager")
+                        .T("首次自动保存被拒绝（未加载存档且未完成恢复）")
+                        .Log();
                     return false;
+                }
             }
 
-            // 如果禁止首次恢复前的自动保存
             if (!isManual && config.forbidAutoSaveBeforeFirstRestore && !_firstRestoreCompleted)
+            {
+                FastString.Acquire().Tag("SaveManager")
+                    .T("禁止首次恢复前的自动保存")
+                    .Log();
                 return false;
-
-            // 如果要求必须已有一个有效快照后才继续自动保存（可扩展新的策略字段）
-            // if (!isManual && config.requireValidSnapshotBeforeAuto && !_hasValidSnapshot) return false;
+            }
 
             return true;
         }
 
-        /// <summary>收集 Providers 的 Section，不清除 dirty（写盘成功后再清除）。</summary>
+        /// <summary>
+        /// 收集 Providers 的 Section，不清除 dirty（写盘成功后再清除）。
+        ///
+        /// PATCH: 现在会把“未脏且未捕获”的 Provider 的旧 Section 复制进新列表，避免丢失。
+        /// </summary>
         private List<SectionBlob> CollectSections(bool forceAll, bool isManual, List<IDirtySaveSectionProvider> dirtyProvidersUsed)
         {
             var newList = new List<SectionBlob>(_providers.Count + 2);
+
+            // 旧快照映射：key -> old blob
+            Dictionary<string, SectionBlob> oldMap = null;
+            if (_composite != null && _composite.sections != null && _composite.sections.Count > 0)
+                oldMap = _composite.sections.ToDictionary(s => s.key, s => s);
+
             foreach (var p in _providers)
             {
-                if (p == null || !p.Ready) continue;
-
-                if (!forceAll && p is IDirtySaveSectionProvider dirtyProv && !dirtyProv.Dirty)
+                if (p == null || !p.Ready)
                     continue;
 
-                ISaveSection section;
-                try { section = p.Capture(); }
+                var dirtyProv = p as IDirtySaveSectionProvider;
+
+                // 条件：未强制保存 + 是脏接口 + 不是脏 -> 复制旧数据（如果存在）
+                if (!forceAll && dirtyProv != null && !dirtyProv.Dirty)
+                {
+                    if (oldMap != null)
+                    {
+                        // 尝试获取 Section Key（需要 SectionType）
+                        var sectionType = GetProviderSectionType(p);
+                        string key = GetProviderKey(p, sectionType);
+
+                        if (key != null && oldMap.TryGetValue(key, out var oldBlob))
+                        {
+                            newList.Add(oldBlob);
+                            if (config.verboseLog)
+                                Debug.Log($"[SaveManager] Preserve(unchanged) key={key}");
+                        }
+                        else
+                        {
+                            // 无旧 Section：代表以前从未写入过；跳过即可
+                            if (config.verboseLog)
+                                Debug.Log($"[SaveManager] Skip provider(no previous section) {p.GetType().Name}");
+                        }
+                    }
+                    else
+                    {
+                        // 没有旧快照，直接跳过（没有数据可保留）
+                        if (config.verboseLog)
+                            Debug.Log($"[SaveManager] Skip provider(no old map) {p.GetType().Name}");
+                    }
+                    continue;
+                }
+
+                // 需要捕获（脏 / 强制 / 非 dirty 接口实现）
+                ISaveSection sectionInstance;
+                try
+                {
+                    sectionInstance = p.Capture();
+                }
                 catch (Exception e)
                 {
                     Debug.LogError($"[SaveManager] Capture 异常 {p.GetType().Name}: {e}");
                     continue;
                 }
-                if (section == null) continue;
 
-                Type type = section.GetType();
-                string sectionJson = _serializer.Serialize(section);
-                string key = GetProviderKey(p, type);
+                if (sectionInstance == null)
+                {
+                    // 注意：这里仅当“本次 provider 明确返回 null”才视为删除/跳过，
+                    // 若不是脏的场景已经被上面逻辑处理。
+                    if (config.verboseLog)
+                        Debug.Log($"[SaveManager] Provider {p.GetType().Name} Capture=null (removed or empty).");
+                    continue;
+                }
+
+                Type type = sectionInstance.GetType();
+                string sectionJson;
+                try
+                {
+                    sectionJson = _serializer.Serialize(sectionInstance);
+                }
+                catch (Exception e)
+                {
+                    Debug.LogError($"[SaveManager] 序列化 Section 失败 {p.GetType().Name}: {e}");
+                    continue;
+                }
+
+                string keyFinal = GetProviderKey(p, type);
                 string typeName = config.storeTypeAssemblyQualified ? type.AssemblyQualifiedName : type.FullName;
 
                 newList.Add(new SectionBlob
                 {
-                    key = key,
+                    key = keyFinal,
                     type = typeName,
                     json = sectionJson
                 });
 
-                if (p is IDirtySaveSectionProvider dirtyAfter && !dirtyProvidersUsed.Contains(dirtyAfter))
-                    dirtyProvidersUsed.Add(dirtyAfter);
+                if (dirtyProv != null && !dirtyProvidersUsed.Contains(dirtyProv))
+                    dirtyProvidersUsed.Add(dirtyProv);
             }
+
             return newList;
         }
 

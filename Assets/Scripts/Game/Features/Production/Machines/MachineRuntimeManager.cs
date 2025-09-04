@@ -2,6 +2,8 @@
 using UnityEngine;
 using Game.Data;
 using Game.Data.Definition.Machines;
+using Game.Features.Production.Processing;
+using System;
 
 namespace Game.Features.Production.Machines
 {
@@ -12,8 +14,13 @@ namespace Game.Features.Production.Machines
     {
         private readonly List<MachineRuntimeState> _machines = new();
         private int _nextId = 1;
-
+        private MachineProcessService _rebuildHelper; // 用于重建时的状态计算
         public IReadOnlyList<MachineRuntimeState> Machines => _machines;
+
+        private void Awake()
+        {
+            _rebuildHelper = new MachineProcessService();
+        }
 
         public MachineRuntimeState SpawnMachine(int defId)
         {
@@ -30,8 +37,9 @@ namespace Game.Features.Production.Machines
 
         public MachineRuntimeState GetByInstanceId(int id)
         {
-            for (int i = 0; i < _machines.Count; i++)
-                if (_machines[i].InstanceId == id) return _machines[i];
+            foreach (MachineRuntimeState t in _machines)
+                if (t.InstanceId == id)
+                    return t;
             return null;
         }
 
@@ -59,7 +67,7 @@ namespace Game.Features.Production.Machines
                     ActiveRecipeId = dto.activeRecipeId,
                     Progress = dto.progress,
                     CompletedCycles = dto.completedCycles,
-                    State = MachineProcessState.Idle // 重新计算状态，由 Tick 决定
+                    Phase = MachinePhase.Idle, 
                 };
 
                 if (dto.input != null)
@@ -71,7 +79,8 @@ namespace Game.Features.Production.Machines
                     foreach (var op in dto.output)
                         if (op.itemId > 0 && op.count > 0)
                             st.OutputBuffer.Add((op.itemId, op.count));
-
+                _rebuildHelper.RebuildStateAfterLoad(st);
+                
                 _machines.Add(st);
                 if (st.InstanceId > maxInstance) maxInstance = st.InstanceId;
             }

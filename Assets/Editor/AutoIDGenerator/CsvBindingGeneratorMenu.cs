@@ -146,6 +146,7 @@ namespace Editor.AutoIDGenerator
         }
 
         #region Incremental Helpers
+
         private static bool WriteFileIfChangedIncremental(string path, string content, CsvGenManifest oldManifest, CsvGenManifest newManifest, CsvCodeGenSettings settings)
         {
             var hash = CsvGenManifest.ComputeHash(content);
@@ -172,9 +173,11 @@ namespace Editor.AutoIDGenerator
             });
             return true;
         }
+
         #endregion
 
         #region Reflection Helpers
+
         private static IEnumerable<Type> FindSectionTypesForDefinition(List<Type> allTypes, Type defType)
         {
             return allTypes.Where(t =>
@@ -199,6 +202,7 @@ namespace Editor.AutoIDGenerator
             }
             return false;
         }
+
         #endregion
 
         #region Binding Generation
@@ -237,6 +241,32 @@ namespace Editor.AutoIDGenerator
             sb.AppendLine($"namespace {ns} {{");
             sb.AppendLine($"internal static class CsvBinding_{defType.Name}");
             sb.AppendLine("{");
+
+            // === Primitive Parse Helper (added) ===
+            sb.AppendLine("    // 基础类型/枚举解析辅助（由导入代码调用）");
+            sb.AppendLine("    private static bool TryParsePrimitive<T>(string s, out T v)");
+            sb.AppendLine("    {");
+            sb.AppendLine("        v = default!;"); // C# 8 nullable 安全
+            sb.AppendLine("        if (string.IsNullOrWhiteSpace(s)) return false;");
+            sb.AppendLine("        var t = typeof(T);");
+            sb.AppendLine("        try {");
+            sb.AppendLine("            if (t == typeof(string)) { v = (T)(object)s; return true; }");
+            sb.AppendLine("            if (t == typeof(int)) { if (int.TryParse(s, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var iv)) { v = (T)(object)iv; return true; } return false; }");
+            sb.AppendLine("            if (t == typeof(float)) { if (float.TryParse(s, System.Globalization.NumberStyles.Float | System.Globalization.NumberStyles.AllowThousands, System.Globalization.CultureInfo.InvariantCulture, out var fv)) { v = (T)(object)fv; return true; } return false; }");
+            sb.AppendLine("            if (t == typeof(double)) { if (double.TryParse(s, System.Globalization.NumberStyles.Float | System.Globalization.NumberStyles.AllowThousands, System.Globalization.CultureInfo.InvariantCulture, out var dv)) { v = (T)(object)dv; return true; } return false; }");
+            sb.AppendLine("            if (t == typeof(long)) { if (long.TryParse(s, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var lv)) { v = (T)(object)lv; return true; } return false; }");
+            sb.AppendLine("            if (t == typeof(bool)) {");
+            sb.AppendLine("                if (bool.TryParse(s, out var bv)) { v = (T)(object)bv; return true; }");
+            sb.AppendLine("                if (s == \"1\") { v = (T)(object)true; return true; }");
+            sb.AppendLine("                if (s == \"0\") { v = (T)(object)false; return true; }");
+            sb.AppendLine("                if (string.Equals(s, \"yes\", System.StringComparison.OrdinalIgnoreCase)) { v = (T)(object)true; return true; }");
+            sb.AppendLine("                if (string.Equals(s, \"no\", System.StringComparison.OrdinalIgnoreCase)) { v = (T)(object)false; return true; }");
+            sb.AppendLine("                return false;");
+            sb.AppendLine("            }");
+            sb.AppendLine("            if (t.IsEnum) { if (System.Enum.TryParse(t, s, true, out var ev)) { v = (T)ev; return true; } return false; }");
+            sb.AppendLine("        } catch { return false; }");
+            sb.AppendLine("        return false;");
+            sb.AppendLine("    }");
 
             // Header
             sb.AppendLine("    internal static readonly string[] Header = new[]{");
@@ -396,7 +426,7 @@ namespace Editor.AutoIDGenerator
                     : "var __ordered = dict.Keys.ToList();";
 
                 return
-$@"        {{
+                    $@"        {{
             var dict = {InstanceExpr(propGuess, fi)} as System.Collections.Generic.IReadOnlyDictionary<{kType.FullName},{vType.FullName}>;
             if (dict == null || dict.Count == 0) d[""{col}""] = """";
             else {{
@@ -421,7 +451,7 @@ $@"        {{
             {
                 var sepChar = string.IsNullOrEmpty(meta.CustomArraySeparator) ? defAttr.ArraySeparator : meta.CustomArraySeparator[0];
                 return
-$@"        {{
+                    $@"        {{
             var __list = {InstanceExpr(propGuess, fi)} as System.Collections.Generic.IReadOnlyList<{elemType.FullName}>;
             if (__list == null || __list.Count == 0) d[""{col}""] = """";
             else {{
@@ -438,7 +468,7 @@ $@"        {{
                     else
                     {{
                         if (__i > 0) __sb.Append('{sepChar}');
-                        __sb.Append(__e != null ? __e.ToString() : """");
+                        __sb.Append(__e.ToString());
                     }}
                 }}
                 d[""{col}""] = __sb.ToString();
@@ -448,7 +478,7 @@ $@"        {{
 
             // 单值自定义类型
             return
-$@"        {{
+                $@"        {{
             string __custom;
             if (CsvTypeConverterRegistry.TrySerialize(typeof({t.FullName}), {InstanceExpr(propGuess, fi)}, out __custom))
                 d[""{col}""] = __custom ?? """";
@@ -507,7 +537,7 @@ $@"        {{
             {
                 var sep = string.IsNullOrEmpty(meta.CustomArraySeparator) ? defAttr.ArraySeparator : meta.CustomArraySeparator[0];
                 sb.AppendLine(
-$@"            var arr = string.IsNullOrWhiteSpace({localVar})
+                    $@"            var arr = string.IsNullOrWhiteSpace({localVar})
                 ? System.Array.Empty<string>()
                 : {localVar}.Split(new[]{{'{sep}'}}, StringSplitOptions.RemoveEmptyEntries)
                     .Select(s=>s.Trim()).Where(s=>s.Length>0).Distinct().ToArray();
@@ -516,7 +546,7 @@ $@"            var arr = string.IsNullOrWhiteSpace({localVar})
             else if (fieldType == typeof(Sprite) && meta.AssetMode == AssetRefMode.Guid)
             {
                 sb.AppendLine(
-@"            if (!string.IsNullOrWhiteSpace(" + localVar + @"))
+                    @"            if (!string.IsNullOrWhiteSpace(" + localVar + @"))
             {
                 var sp = resolver.LoadSpriteByGuid(" + localVar + @".Trim());
                 target." + setterName + @"(sp);
@@ -527,7 +557,7 @@ $@"            var arr = string.IsNullOrWhiteSpace({localVar})
             {
                 var sep = string.IsNullOrEmpty(meta.CustomArraySeparator) ? defAttr.ArraySeparator : meta.CustomArraySeparator[0];
                 sb.AppendLine(
-$@"            if (string.IsNullOrWhiteSpace({localVar})) {{
+                    $@"            if (string.IsNullOrWhiteSpace({localVar})) {{
                 target.{setterName}(new System.Collections.Generic.Dictionary<{kType.FullName},{vType.FullName}>());
             }} else {{
                 var _parts = {localVar}.Split(new[]{{'{sep}'}}, StringSplitOptions.RemoveEmptyEntries);
@@ -565,7 +595,7 @@ $@"            if (string.IsNullOrWhiteSpace({localVar})) {{
             {
                 var sep = string.IsNullOrEmpty(meta.CustomArraySeparator) ? defAttr.ArraySeparator : meta.CustomArraySeparator[0];
                 sb.AppendLine(
-$@"            if (string.IsNullOrWhiteSpace({localVar})) {{
+                    $@"            if (string.IsNullOrWhiteSpace({localVar})) {{
                 target.{setterName}(System.Array.Empty<{elemType.FullName}>());
             }} else {{
                 var _parts = {localVar}.Split(new[]{{'{sep}'}}, StringSplitOptions.RemoveEmptyEntries);
@@ -592,7 +622,7 @@ $@"            if (string.IsNullOrWhiteSpace({localVar})) {{
             else
             {
                 sb.AppendLine(
-$@"            if (CsvTypeConverterRegistry.TryDeserialize(typeof({fieldType.FullName}), {localVar}, out var __boxed))
+                    $@"            if (CsvTypeConverterRegistry.TryDeserialize(typeof({fieldType.FullName}), {localVar}, out var __boxed))
             {{
                 target.{setterName}( ({fieldType.FullName})__boxed );
             }}
@@ -610,9 +640,11 @@ $@"            if (CsvTypeConverterRegistry.TryDeserialize(typeof({fieldType.Ful
             // 附加 TryParsePrimitive<T> 静态泛型方法只生成一次可放最下面，这里简化放 Section Adapter 内或 Binding 末尾
             return sb.ToString();
         }
+
         #endregion
 
         #region Section Adapter
+
         private static string GenerateSectionAdapter(Type defType, Type sectionType)
         {
             var ns = string.IsNullOrEmpty(sectionType.Namespace) ? "GlobalNamespace" : sectionType.Namespace;
@@ -751,9 +783,11 @@ $@"            if (CsvTypeConverterRegistry.TryDeserialize(typeof({fieldType.Ful
             sb.AppendLine("}"); // ns
             return sb.ToString();
         }
+
         #endregion
 
         #region Editor Setter Partial
+
         private static string GenerateEditorSetterPartial(Type defType, List<FieldInfo> fields)
         {
             var ns = string.IsNullOrEmpty(defType.Namespace) ? "GlobalNamespace" : defType.Namespace;
@@ -778,6 +812,7 @@ $@"            if (CsvTypeConverterRegistry.TryDeserialize(typeof({fieldType.Ful
             if (!t.IsGenericType) return t.FullName?.Replace("+", ".") ?? t.Name;
             return t.FullName?.Replace("+", ".") ?? t.Name;
         }
+
         #endregion
     }
 }

@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using UnityEngine;
 
 namespace Game.CSV
 {
@@ -46,8 +47,9 @@ namespace Game.CSV
                     if (i > 0) sb.Append(',');
                     string remark = i < remarks.Count ? remarks[i] : string.Empty;
                     // 可选策略：空 remark 自动用 header[i] 填充：
-                    // if (string.IsNullOrEmpty(remark)) remark = header[i];
+                    if (string.IsNullOrEmpty(remark)) remark = header[i];
                     sb.Append(Escape(remark ?? ""));
+                    Debug.Log($"[CSVGen] 备注行 {remark}");
                 }
                 sb.Append('\n');
             }

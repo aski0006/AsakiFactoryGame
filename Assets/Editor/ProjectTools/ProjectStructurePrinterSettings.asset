@@ -20,11 +20,11 @@ MonoBehaviour:
     useUnicodeTree: 1
     sortFoldersFirst: 0
     alphabetical: 0
-    incremental: 0
+    incremental: 1
     collapseSingleChild: 0
     minFileSizeBytes: 0
     fileExtensionsFilter: .cs
-    ignoreNamePatterns: obj,bin,temp,.DS_Store,Thumbs.db,DefaultVolumeProfile,InputSystem_Actions,UniversalRenderPipelineGlobalSettings,Settings,Sprites,Scenes,UniTask
+    ignoreNamePatterns: obj,bin,temp,.DS_Store,Thumbs.db,DefaultVolumeProfile,InputSystem_Actions,UniversalRenderPipelineGlobalSettings,Settings,Sprites,Scenes,UniTask,Sortify
     ignorePathContains: Packages~,__backup__,~$
     ignoreMeta: 1
     trimTrailingSpaces: 0

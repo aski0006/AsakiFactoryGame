@@ -12,7 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b28e3e02f7444290a78dddb23985f0b3, type: 3}
   m_Name: ConfigDatabaseState
   m_EditorClassIdentifier: 
-  selectedTypeIndex: 0
+  selectedTypeIndex: 4
   searchText: 
   caseSensitiveSearch: 0
   showInspectorEmbedded: 1
@@ -36,6 +36,7 @@ MonoBehaviour:
   - Game.Data.Definition.Recipes.BaseRecipeSection
   - Game.Data.Definition.Machines.BaseMachineSection
   - Game.Data.Definition.Items.BaseItemSection
+  - Game.CSV.CsvCodeGenSettings
   typeSelectionGuids:
   - baef602c0fa99f847bdbc865dfd116e2
   - c74dafff408102044a538688c6952038
@@ -45,3 +46,4 @@ MonoBehaviour:
   - 753adea7ac19af947bdcec455e30e4d7
   - e28aef3e240185e48aa8a46117f033ec
   - 3e342c6c9186d814eb189d70a12c1122
+  - 6ff8240022eb6f7408efa8fab93ae194

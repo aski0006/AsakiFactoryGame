@@ -9,6 +9,30 @@ using Game.CSV;
 namespace Game.Data.Definition.Recipes {
 internal static class CsvBinding_BaseRecipeDefinition
 {
+    // 基础类型/枚举解析辅助（由导入代码调用）
+    private static bool TryParsePrimitive<T>(string s, out T v)
+    {
+        v = default!;
+        if (string.IsNullOrWhiteSpace(s)) return false;
+        var t = typeof(T);
+        try {
+            if (t == typeof(string)) { v = (T)(object)s; return true; }
+            if (t == typeof(int)) { if (int.TryParse(s, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var iv)) { v = (T)(object)iv; return true; } return false; }
+            if (t == typeof(float)) { if (float.TryParse(s, System.Globalization.NumberStyles.Float | System.Globalization.NumberStyles.AllowThousands, System.Globalization.CultureInfo.InvariantCulture, out var fv)) { v = (T)(object)fv; return true; } return false; }
+            if (t == typeof(double)) { if (double.TryParse(s, System.Globalization.NumberStyles.Float | System.Globalization.NumberStyles.AllowThousands, System.Globalization.CultureInfo.InvariantCulture, out var dv)) { v = (T)(object)dv; return true; } return false; }
+            if (t == typeof(long)) { if (long.TryParse(s, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var lv)) { v = (T)(object)lv; return true; } return false; }
+            if (t == typeof(bool)) {
+                if (bool.TryParse(s, out var bv)) { v = (T)(object)bv; return true; }
+                if (s == "1") { v = (T)(object)true; return true; }
+                if (s == "0") { v = (T)(object)false; return true; }
+                if (string.Equals(s, "yes", System.StringComparison.OrdinalIgnoreCase)) { v = (T)(object)true; return true; }
+                if (string.Equals(s, "no", System.StringComparison.OrdinalIgnoreCase)) { v = (T)(object)false; return true; }
+                return false;
+            }
+            if (t.IsEnum) { if (System.Enum.TryParse(t, s, true, out var ev)) { v = (T)ev; return true; } return false; }
+        } catch { return false; }
+        return false;
+    }
     internal static readonly string[] Header = new[]{
         "id",
         "codeName",
@@ -51,15 +75,14 @@ internal static class CsvBinding_BaseRecipeDefinition
         d["id"] = def.Id.ToString();
         d["codeName"] = def.CodeName ?? "";
         d["displayName"] = def.DisplayName ?? "";
-        if (def.Inputs != null)
         {
-            var arr = def.Inputs;
-            if (arr.Length == 0) d["inputs"] = "";
+            var __list = def.Inputs as System.Collections.Generic.IReadOnlyList<Game.Data.Definition.Recipes.ItemStack>;
+            if (__list == null || __list.Count == 0) d["inputs"] = "";
             else {
                 System.Text.StringBuilder __sb = new System.Text.StringBuilder();
-                for (int __i = 0; __i < arr.Length; __i++)
+                for (int __i = 0; __i < __list.Count; __i++)
                 {
-                    var __e = arr[__i];
+                    var __e = __list[__i];
                     string __s;
                     if (CsvTypeConverterRegistry.TrySerialize(typeof(Game.Data.Definition.Recipes.ItemStack), __e, out __s))
                     {
@@ -68,7 +91,6 @@ internal static class CsvBinding_BaseRecipeDefinition
                     }
                     else
                     {
-                        // 回退 ToString
                         if (__i > 0) __sb.Append(',');
                         __sb.Append(__e.ToString());
                     }
@@ -76,16 +98,14 @@ internal static class CsvBinding_BaseRecipeDefinition
                 d["inputs"] = __sb.ToString();
             }
         }
-        else d["inputs"] = "";
-        if (def.Outputs != null)
         {
-            var arr = def.Outputs;
-            if (arr.Length == 0) d["outputs"] = "";
+            var __list = def.Outputs as System.Collections.Generic.IReadOnlyList<Game.Data.Definition.Recipes.ItemStack>;
+            if (__list == null || __list.Count == 0) d["outputs"] = "";
             else {
                 System.Text.StringBuilder __sb = new System.Text.StringBuilder();
-                for (int __i = 0; __i < arr.Length; __i++)
+                for (int __i = 0; __i < __list.Count; __i++)
                 {
-                    var __e = arr[__i];
+                    var __e = __list[__i];
                     string __s;
                     if (CsvTypeConverterRegistry.TrySerialize(typeof(Game.Data.Definition.Recipes.ItemStack), __e, out __s))
                     {
@@ -94,7 +114,6 @@ internal static class CsvBinding_BaseRecipeDefinition
                     }
                     else
                     {
-                        // 回退 ToString
                         if (__i > 0) __sb.Append(',');
                         __sb.Append(__e.ToString());
                     }
@@ -102,7 +121,6 @@ internal static class CsvBinding_BaseRecipeDefinition
                 d["outputs"] = __sb.ToString();
             }
         }
-        else d["outputs"] = "";
         d["timeSeconds"] = def.TimeSeconds.ToString();
         d["machineType"] = def.MachineType.ToString();
         d["allowHandCraft"] = def.AllowHandCraft ? "true" : "false";
@@ -154,8 +172,11 @@ internal static class CsvBinding_BaseRecipeDefinition
                     }
                     else
                     {
-                        // 尝试直接 Parse 数字到元素(若是基础数值)或忽略（可按需要扩展）
-                        // 没有转换器则跳过
+                        if (TryParsePrimitive<Game.Data.Definition.Recipes.ItemStack>(__token, out var __prim))
+                            _list.Add(__prim);
+                        else if (typeof(Game.Data.Definition.Recipes.ItemStack) == typeof(string))
+                            _list.Add( ( Game.Data.Definition.Recipes.ItemStack )(object)__token );
+                        // 否则忽略
                     }
                 }
                 target.__CsvSet_inputs(_list.ToArray());
@@ -179,8 +200,11 @@ internal static class CsvBinding_BaseRecipeDefinition
                     }
                     else
                     {
-                        // 尝试直接 Parse 数字到元素(若是基础数值)或忽略（可按需要扩展）
-                        // 没有转换器则跳过
+                        if (TryParsePrimitive<Game.Data.Definition.Recipes.ItemStack>(__token, out var __prim))
+                            _list.Add(__prim);
+                        else if (typeof(Game.Data.Definition.Recipes.ItemStack) == typeof(string))
+                            _list.Add( ( Game.Data.Definition.Recipes.ItemStack )(object)__token );
+                        // 否则忽略
                     }
                 }
                 target.__CsvSet_outputs(_list.ToArray());

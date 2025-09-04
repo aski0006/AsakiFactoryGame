@@ -9,6 +9,30 @@ using Game.CSV;
 namespace Game.Data.Definition.Items {
 internal static class CsvBinding_BaseItemDefinition
 {
+    // 基础类型/枚举解析辅助（由导入代码调用）
+    private static bool TryParsePrimitive<T>(string s, out T v)
+    {
+        v = default!;
+        if (string.IsNullOrWhiteSpace(s)) return false;
+        var t = typeof(T);
+        try {
+            if (t == typeof(string)) { v = (T)(object)s; return true; }
+            if (t == typeof(int)) { if (int.TryParse(s, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var iv)) { v = (T)(object)iv; return true; } return false; }
+            if (t == typeof(float)) { if (float.TryParse(s, System.Globalization.NumberStyles.Float | System.Globalization.NumberStyles.AllowThousands, System.Globalization.CultureInfo.InvariantCulture, out var fv)) { v = (T)(object)fv; return true; } return false; }
+            if (t == typeof(double)) { if (double.TryParse(s, System.Globalization.NumberStyles.Float | System.Globalization.NumberStyles.AllowThousands, System.Globalization.CultureInfo.InvariantCulture, out var dv)) { v = (T)(object)dv; return true; } return false; }
+            if (t == typeof(long)) { if (long.TryParse(s, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var lv)) { v = (T)(object)lv; return true; } return false; }
+            if (t == typeof(bool)) {
+                if (bool.TryParse(s, out var bv)) { v = (T)(object)bv; return true; }
+                if (s == "1") { v = (T)(object)true; return true; }
+                if (s == "0") { v = (T)(object)false; return true; }
+                if (string.Equals(s, "yes", System.StringComparison.OrdinalIgnoreCase)) { v = (T)(object)true; return true; }
+                if (string.Equals(s, "no", System.StringComparison.OrdinalIgnoreCase)) { v = (T)(object)false; return true; }
+                return false;
+            }
+            if (t.IsEnum) { if (System.Enum.TryParse(t, s, true, out var ev)) { v = (T)ev; return true; } return false; }
+        } catch { return false; }
+        return false;
+    }
     internal static readonly string[] Header = new[]{
         "id",
         "codeName",

@@ -6,6 +6,7 @@ using Game.Data.Definition.Recipes;
 using Game.Data.Generated;
 using Game.Features.Production.Inventory;
 using Game.Features.Production.Machines;
+using Game.Features.Production.Processing;
 using Game.Save;
 using Game.Singletons.Core;
 using UnityEngine;
@@ -15,23 +16,30 @@ namespace Game.Features.Production.Debug
     /// <summary>
     /// 生产调试面板：
     /// - 放置机器
-    /// - 显示配方（过滤 MachineType）
-    /// - 从玩家背包扣除材料注入机器
-    /// - 显示当前配方进度 / ETA / 完成次数
-    /// - 显示输入/输出缓冲（物品名称）
+    /// - 显示 / 选择配方
+    /// - 注入 / 补充输入
+    /// - 显示进度 / 状态 / 循环次数
+    /// - 收集输出
+    ///
+    /// 已重构为使用 MachineProcessService API：
+    ///  1) 启动配方： process.TryStart(...)
+    ///  2) 补料：     process.TryRefillInputs(...)
+    ///  3) 收集输出： process.TryCollectOutputs(...)
+    ///  4) 停止：     process.Stop(...)
+    ///  不再直接写 machine.ActiveRecipeId / Progress / Phase（除极少数清空缓冲的调试操作）。
     /// </summary>
     public class ProductionDebugPanel : MonoBehaviour
     {
         public MachineRuntimeManager machineManager;
-        public Production.Processing.ProductionTickService tickService;
+        public ProductionTickService tickService;
         public InventoryComponent playerInventory;
 
         private Vector2 _scroll;
         private int _selectedMachineId;
         private bool _showRecipeList;
-        private readonly List<BaseRecipeDefinition> _tempRecipes = new();
+        private readonly List<BaseRecipeDefinition> _tempRecipes = new List<BaseRecipeDefinition>();
 
-        // 当前示例使用固定配方常量数组（后期可用 MachineRecipeHelper）
+        // 示例使用固定配方常量数组（后期可改为 MachineRecipeHelper）
         private readonly int[] _recipeConstIds =
         {
             ConfigIds.BaseRecipeDefinition.WoodToWoodPlank,
@@ -45,10 +53,12 @@ namespace Game.Features.Production.Debug
         private GUIStyle _richLabel;
         private bool _stylesReady;
 
+        private MachineProcessService Process => tickService ? tickService.MachineProcessService : null;
+
         private void Awake()
         {
             if (!machineManager) machineManager = FindFirstObjectByType<MachineRuntimeManager>();
-            if (!tickService) tickService = FindFirstObjectByType<Production.Processing.ProductionTickService>();
+            if (!tickService) tickService = FindFirstObjectByType<ProductionTickService>();
             if (!playerInventory) playerInventory = FindFirstObjectByType<InventoryComponent>();
         }
 
@@ -100,7 +110,7 @@ namespace Game.Features.Production.Debug
             DrawSelectedMachine();
             GUILayout.Space(10);
             DrawInventoryPreview();
-            
+
             GUILayout.EndScrollView();
             GUILayout.EndArea();
         }
@@ -118,9 +128,9 @@ namespace Game.Features.Production.Debug
                 GUILayout.Label("<color=red>[Missing] InventoryComponent</color>", _richLabel);
                 ok = false;
             }
-            if (!tickService)
+            if (!tickService || Process == null)
             {
-                GUILayout.Label("<color=yellow>[Warn] ProductionTickService 未找到 (进度不更新)</color>", _richLabel);
+                GUILayout.Label("<color=yellow>[Warn] ProductionTickService / ProcessService 未找到 (进度不更新)</color>", _richLabel);
             }
             return ok;
         }
@@ -155,7 +165,7 @@ namespace Game.Features.Production.Debug
 
             foreach (var m in machineManager.Machines)
             {
-                if (GUILayout.Button($"{m.InstanceId} {m.Definition.CodeName}  State={m.State}  Prog={m.Progress:0.0}  Cycles={m.CompletedCycles}"))
+                if (GUILayout.Button($"{m.InstanceId} {m.Definition.CodeName}  Phase={m.Phase}  Prog={m.Progress:0.0}  Cycles={m.CompletedCycles}"))
                 {
                     _selectedMachineId = m.InstanceId;
                 }
@@ -175,7 +185,6 @@ namespace Game.Features.Production.Debug
             GUILayout.Space(4);
             GUILayout.Label($"=== Selected Machine #{m.InstanceId} ({m.Definition.DisplayName}) ===");
 
-            // 当前配方
             if (m.ActiveRecipeId != null)
             {
                 var recipe = GameContext.Instance.GetDefinition<BaseRecipeDefinition>(m.ActiveRecipeId.Value);
@@ -185,23 +194,30 @@ namespace Game.Features.Production.Debug
                 DrawProgressBar(m, recipe);
 
                 GUILayout.BeginHorizontal();
+                GUI.enabled = Process != null;
                 if (GUILayout.Button("Refill Inputs"))
                 {
-                    MachineInventoryBridge.TryRefillMissing(playerInventory, m, recipe);
+                    Process?.TryRefillInputs(m, playerInventory);
                 }
+                GUI.enabled = true;
+
                 if (GUILayout.Button("Clear Buffers"))
                 {
                     m.InputBuffer.Clear();
                     m.OutputBuffer.Clear();
                     m.Progress = 0f;
-                    m.State = MachineProcessState.Idle;
+                    if (m.ActiveRecipeId != null)
+                    {
+                        m.Phase = MachinePhase.PendingInput;
+                    }
                 }
+
+                GUI.enabled = Process != null;
                 if (GUILayout.Button("Stop Recipe"))
                 {
-                    m.ActiveRecipeId = null;
-                    m.Progress = 0f;
-                    m.State = MachineProcessState.Idle;
+                    Process?.Stop(m);
                 }
+                GUI.enabled = true;
                 GUILayout.EndHorizontal();
             }
             else
@@ -209,14 +225,12 @@ namespace Game.Features.Production.Debug
                 GUILayout.Label("No active recipe.");
             }
 
-            // 配方列表
             if (GUILayout.Button(_showRecipeList ? "Hide Recipes" : "Show Recipes"))
                 _showRecipeList = !_showRecipeList;
 
             if (_showRecipeList)
                 DrawRecipeSelection(m);
 
-            // IO
             DrawIOBuffers(m);
         }
 
@@ -232,17 +246,23 @@ namespace Game.Features.Production.Debug
             }
             GUI.Label(outer, $"Progress {pct * 100f:0.#}% ({m.Progress:0.0}/{recipe.TimeSeconds:0.0}s)  Cycles={m.CompletedCycles}");
 
-            switch (m.State)
+            switch (m.Phase)
             {
-                case MachineProcessState.BlockedOutput:
+                case MachinePhase.BlockedOutput:
                     GUILayout.Label("<color=orange>输出缓冲已满，等待清空。</color>", _richLabel);
                     break;
-                case MachineProcessState.BlockedInput:
+                case MachinePhase.BlockedInput:
                     GUILayout.Label("<color=yellow>缺少输入或尚未注入。</color>", _richLabel);
                     break;
-                case MachineProcessState.Processing:
+                case MachinePhase.Processing:
                     float remain = Mathf.Max(0, recipe.TimeSeconds - m.Progress);
                     GUILayout.Label($"ETA: {remain:0.0}s", _richLabel);
+                    break;
+                case MachinePhase.PendingInput:
+                    GUILayout.Label("<color=grey>等待输入装载或即将开始。</color>", _richLabel);
+                    break;
+                case MachinePhase.OutputReady:
+                    GUILayout.Label("<color=lime>产出已就绪。</color>", _richLabel);
                     break;
             }
         }
@@ -271,31 +291,32 @@ namespace Game.Features.Production.Debug
                 bool hasAll = MachineInventoryBridge.InventoryHasAllInputs(playerInventory, r);
                 string io = MachineInventoryBridge.FormatRecipeIO(r);
                 string color = hasAll ? "lime" : "grey";
+
                 GUILayout.BeginVertical("box");
                 GUILayout.Label($"<b>{r.DisplayName}</b>  <color={color}>[{r.TimeSeconds:0.0}s]</color>", _richLabel);
                 GUILayout.Label(io, _richLabel);
 
                 GUILayout.BeginHorizontal();
+                GUI.enabled = Process != null;
                 if (GUILayout.Button("Set"))
                 {
-                    m.ActiveRecipeId = r.Id;
-                    m.Progress = 0f;
-                    m.State = MachineProcessState.Idle;
+                    Process?.TryStart(m, r.Id, resetProgress: true);
                 }
 
-                GUI.enabled = hasAll;
+                GUI.enabled = Process != null;
                 if (GUILayout.Button("Set+Load"))
                 {
-                    m.ActiveRecipeId = r.Id;
-                    m.Progress = 0f;
-                    m.State = MachineProcessState.Idle;
-                    MachineInventoryBridge.TryMoveInputs(playerInventory, m, r);
+                    if (Process?.TryStart(m, r.Id, resetProgress: true) == true)
+                    {
+                        // 立即尝试补齐输入
+                        Process?.TryRefillInputs(m, playerInventory);
+                    }
                 }
 
-                GUI.enabled = m.ActiveRecipeId == r.Id && hasAll;
+                GUI.enabled = Process != null && m.ActiveRecipeId == r.Id;
                 if (GUILayout.Button("Refill"))
                 {
-                    MachineInventoryBridge.TryRefillMissing(playerInventory, m, r);
+                    Process?.TryRefillInputs(m, playerInventory);
                 }
                 GUI.enabled = true;
                 GUILayout.EndHorizontal();
@@ -329,14 +350,13 @@ namespace Game.Features.Production.Debug
                     var idef = ctx.GetDefinition<BaseItemDefinition>(slot.itemId);
                     GUILayout.Label($" - {idef.DisplayName} x{slot.count}");
                 }
+
+                GUI.enabled = Process != null;
                 if (GUILayout.Button("Take All Outputs → Inventory"))
                 {
-                    foreach (var slot in m.OutputBuffer)
-                        playerInventory.AddItem(slot.itemId, slot.count);
-                    m.OutputBuffer.Clear();
-                    if (m.State == MachineProcessState.BlockedOutput)
-                        m.State = MachineProcessState.Idle;
+                    Process?.TryCollectOutputs(m, playerInventory);
                 }
+                GUI.enabled = true;
             }
         }
 
@@ -355,12 +375,12 @@ namespace Game.Features.Production.Debug
             if (GUILayout.Button("Give Wood x10"))
             {
                 playerInventory.AddItem(ConfigIds.BaseItemDefinition.Wood, 10);
-                FastString.Acquire().Tag("ProductionDebugPanel").T("Inventory updated -> Give").I(10).T(" Wood").Log();
+                FastString.Acquire().Tag("ProductionDebugPanel").T("Inventory updated -> Give ").I(10).T(" Wood").Log();
             }
             if (GUILayout.Button("Give CopperOre x10"))
             {
                 playerInventory.AddItem(ConfigIds.BaseItemDefinition.CopperOre, 10);
-                FastString.Acquire().Tag("ProductionDebugPanel").T("Inventory updated -> Give").I(10).T(" CopperOre").Log();
+                FastString.Acquire().Tag("ProductionDebugPanel").T("Inventory updated -> Give ").I(10).T(" CopperOre").Log();
             }
             if (GUILayout.Button("Save"))
             {

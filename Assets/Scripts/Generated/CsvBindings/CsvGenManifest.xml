@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<CsvGenManifest xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <Files>
+    <File FilePath="Assets/Scripts/Generated/CsvBindings\BaseRecipeDefinition_CsvBinding.g.cs" Hash="3e9caeabf5a93279e0ca8ba5045041f038f97aa3" TypeFullName="" />
+    <File FilePath="Assets/Scripts/Generated/CsvBindings\BaseRecipeDefinition_CsvSetters.g.cs" Hash="8088e746b6c973e60008da54a7a30d701ebacc29" TypeFullName="" />
+    <File FilePath="Assets/Scripts/Generated/CsvBindings\BaseRecipeSection_CsvAdapter.g.cs" Hash="b4ae7d1cae6edffa7c520fed760400d035bc53e9" TypeFullName="" />
+    <File FilePath="Assets/Scripts/Generated/CsvBindings\BaseMachineDefinition_CsvBinding.g.cs" Hash="3627c4ea2e95d466c8e9b1ef97b38c1d76e579bd" TypeFullName="" />
+    <File FilePath="Assets/Scripts/Generated/CsvBindings\BaseMachineDefinition_CsvSetters.g.cs" Hash="e75c3dad8f64f62d9d5991fa1cedeb4434fd342f" TypeFullName="" />
+    <File FilePath="Assets/Scripts/Generated/CsvBindings\BaseMachineSection_CsvAdapter.g.cs" Hash="03081c6715c93d852cb3d5206960fc88e6c6ac44" TypeFullName="" />
+    <File FilePath="Assets/Scripts/Generated/CsvBindings\BaseItemDefinition_CsvBinding.g.cs" Hash="9acb4df2cc79b668ab28dc83cbd3cf3308910982" TypeFullName="" />
+    <File FilePath="Assets/Scripts/Generated/CsvBindings\BaseItemDefinition_CsvSetters.g.cs" Hash="55fe6b1188a76e54f9431161eaaff4aee3d86366" TypeFullName="" />
+    <File FilePath="Assets/Scripts/Generated/CsvBindings\BaseItemSection_CsvAdapter.g.cs" Hash="3cc45d3adc6c4c3ae459aaf068725d2234473d03" TypeFullName="" />
+  </Files>
+</CsvGenManifest>

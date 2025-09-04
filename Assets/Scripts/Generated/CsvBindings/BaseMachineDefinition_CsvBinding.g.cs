@@ -9,6 +9,30 @@ using Game.CSV;
 namespace Game.Data.Definition.Machines {
 internal static class CsvBinding_BaseMachineDefinition
 {
+    // 基础类型/枚举解析辅助（由导入代码调用）
+    private static bool TryParsePrimitive<T>(string s, out T v)
+    {
+        v = default!;
+        if (string.IsNullOrWhiteSpace(s)) return false;
+        var t = typeof(T);
+        try {
+            if (t == typeof(string)) { v = (T)(object)s; return true; }
+            if (t == typeof(int)) { if (int.TryParse(s, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var iv)) { v = (T)(object)iv; return true; } return false; }
+            if (t == typeof(float)) { if (float.TryParse(s, System.Globalization.NumberStyles.Float | System.Globalization.NumberStyles.AllowThousands, System.Globalization.CultureInfo.InvariantCulture, out var fv)) { v = (T)(object)fv; return true; } return false; }
+            if (t == typeof(double)) { if (double.TryParse(s, System.Globalization.NumberStyles.Float | System.Globalization.NumberStyles.AllowThousands, System.Globalization.CultureInfo.InvariantCulture, out var dv)) { v = (T)(object)dv; return true; } return false; }
+            if (t == typeof(long)) { if (long.TryParse(s, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var lv)) { v = (T)(object)lv; return true; } return false; }
+            if (t == typeof(bool)) {
+                if (bool.TryParse(s, out var bv)) { v = (T)(object)bv; return true; }
+                if (s == "1") { v = (T)(object)true; return true; }
+                if (s == "0") { v = (T)(object)false; return true; }
+                if (string.Equals(s, "yes", System.StringComparison.OrdinalIgnoreCase)) { v = (T)(object)true; return true; }
+                if (string.Equals(s, "no", System.StringComparison.OrdinalIgnoreCase)) { v = (T)(object)false; return true; }
+                return false;
+            }
+            if (t.IsEnum) { if (System.Enum.TryParse(t, s, true, out var ev)) { v = (T)ev; return true; } return false; }
+        } catch { return false; }
+        return false;
+    }
     internal static readonly string[] Header = new[]{
         "id",
         "codeName",
@@ -93,15 +117,14 @@ internal static class CsvBinding_BaseMachineDefinition
         d["basePowerConsumption"] = def.BasePowerConsumption.ToString();
         d["idleConsumesPower"] = def.IdleConsumesPower ? "true" : "false";
         d["useWhitelist"] = def.UseWhitelist ? "true" : "false";
-        if (def.RecipeWhitelistIds != null)
         {
-            var arr = def.RecipeWhitelistIds;
-            if (arr.Count == 0) d["recipeWhitelistIds"] = "";
+            var __list = def.RecipeWhitelistIds as System.Collections.Generic.IReadOnlyList<System.Int32>;
+            if (__list == null || __list.Count == 0) d["recipeWhitelistIds"] = "";
             else {
                 System.Text.StringBuilder __sb = new System.Text.StringBuilder();
-                for (int __i = 0; __i < arr.Count; __i++)
+                for (int __i = 0; __i < __list.Count; __i++)
                 {
-                    var __e = arr[__i];
+                    var __e = __list[__i];
                     string __s;
                     if (CsvTypeConverterRegistry.TrySerialize(typeof(System.Int32), __e, out __s))
                     {
@@ -110,24 +133,21 @@ internal static class CsvBinding_BaseMachineDefinition
                     }
                     else
                     {
-                        // 回退 ToString
                         if (__i > 0) __sb.Append(';');
-                        __sb.Append(__e != null ? __e.ToString() : "");
+                        __sb.Append(__e.ToString());
                     }
                 }
                 d["recipeWhitelistIds"] = __sb.ToString();
             }
         }
-        else d["recipeWhitelistIds"] = "";
-        if (def.RecipeBlacklistIds != null)
         {
-            var arr = def.RecipeBlacklistIds;
-            if (arr.Count == 0) d["recipeBlacklistIds"] = "";
+            var __list = def.RecipeBlacklistIds as System.Collections.Generic.IReadOnlyList<System.Int32>;
+            if (__list == null || __list.Count == 0) d["recipeBlacklistIds"] = "";
             else {
                 System.Text.StringBuilder __sb = new System.Text.StringBuilder();
-                for (int __i = 0; __i < arr.Count; __i++)
+                for (int __i = 0; __i < __list.Count; __i++)
                 {
-                    var __e = arr[__i];
+                    var __e = __list[__i];
                     string __s;
                     if (CsvTypeConverterRegistry.TrySerialize(typeof(System.Int32), __e, out __s))
                     {
@@ -136,15 +156,13 @@ internal static class CsvBinding_BaseMachineDefinition
                     }
                     else
                     {
-                        // 回退 ToString
                         if (__i > 0) __sb.Append(';');
-                        __sb.Append(__e != null ? __e.ToString() : "");
+                        __sb.Append(__e.ToString());
                     }
                 }
                 d["recipeBlacklistIds"] = __sb.ToString();
             }
         }
-        else d["recipeBlacklistIds"] = "";
         d["includeHandRecipes"] = def.IncludeHandRecipes ? "true" : "false";
         {
             string __custom;
@@ -201,9 +219,13 @@ internal static class CsvBinding_BaseMachineDefinition
             {
                 target.__CsvSet_size( (UnityEngine.Vector2Int)__boxed );
             }
-            else
+            else if (TryParsePrimitive<UnityEngine.Vector2Int>(v_size, out var __prim))
             {
-                // 未找到转换器：忽略（可以在此加日志）
+                target.__CsvSet_size(__prim);
+            }
+            else if (typeof(UnityEngine.Vector2Int) == typeof(string) && !string.IsNullOrEmpty(v_size))
+            {
+                target.__CsvSet_size((UnityEngine.Vector2Int)(object)v_size);
             }
         }
 
@@ -296,8 +318,11 @@ internal static class CsvBinding_BaseMachineDefinition
                     }
                     else
                     {
-                        // 尝试直接 Parse 数字到元素(若是基础数值)或忽略（可按需要扩展）
-                        // 没有转换器则跳过
+                        if (TryParsePrimitive<System.Int32>(__token, out var __prim))
+                            _list.Add(__prim);
+                        else if (typeof(System.Int32) == typeof(string))
+                            _list.Add( ( System.Int32 )(object)__token );
+                        // 否则忽略
                     }
                 }
                 target.__CsvSet_recipeWhitelistIds(_list.ToArray());
@@ -321,8 +346,11 @@ internal static class CsvBinding_BaseMachineDefinition
                     }
                     else
                     {
-                        // 尝试直接 Parse 数字到元素(若是基础数值)或忽略（可按需要扩展）
-                        // 没有转换器则跳过
+                        if (TryParsePrimitive<System.Int32>(__token, out var __prim))
+                            _list.Add(__prim);
+                        else if (typeof(System.Int32) == typeof(string))
+                            _list.Add( ( System.Int32 )(object)__token );
+                        // 否则忽略
                     }
                 }
                 target.__CsvSet_recipeBlacklistIds(_list.ToArray());
@@ -342,9 +370,13 @@ internal static class CsvBinding_BaseMachineDefinition
             {
                 target.__CsvSet_icon( (UnityEngine.Sprite)__boxed );
             }
-            else
+            else if (TryParsePrimitive<UnityEngine.Sprite>(v_icon, out var __prim))
             {
-                // 未找到转换器：忽略（可以在此加日志）
+                target.__CsvSet_icon(__prim);
+            }
+            else if (typeof(UnityEngine.Sprite) == typeof(string) && !string.IsNullOrEmpty(v_icon))
+            {
+                target.__CsvSet_icon((UnityEngine.Sprite)(object)v_icon);
             }
         }
 
@@ -361,9 +393,13 @@ internal static class CsvBinding_BaseMachineDefinition
             {
                 target.__CsvSet_prefab( (UnityEngine.GameObject)__boxed );
             }
-            else
+            else if (TryParsePrimitive<UnityEngine.GameObject>(v_prefab, out var __prim))
             {
-                // 未找到转换器：忽略（可以在此加日志）
+                target.__CsvSet_prefab(__prim);
+            }
+            else if (typeof(UnityEngine.GameObject) == typeof(string) && !string.IsNullOrEmpty(v_prefab))
+            {
+                target.__CsvSet_prefab((UnityEngine.GameObject)(object)v_prefab);
             }
         }
 

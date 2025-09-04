@@ -68,16 +68,58 @@ public partial class BaseMachineSection : ICsvImportableConfig, ICsvExportableCo
             yield return CsvBinding_BaseMachineDefinition.Export(di.definition);
         }
     }
-    /// <summary>
-    /// 导出 CSV：第一行中文备注，第二行英文列名，后续为数据行。
-    /// </summary>
     public void ExportCsv(string path, bool utf8Bom = true)
     {
         var header = CsvBinding_BaseMachineDefinition.Header;
         var remarks = CsvBinding_BaseMachineDefinition.Remarks;
         var rows = ExportCsvRows();
         CsvExportUtility.Write(path, header, rows, remarks, utf8Bom);
+#if UNITY_EDITOR
         Debug.Log($"[CSVGen] 导出完成: {path}");
+#endif
+    }
+    private static bool TryParsePrimitive<T>(string s, out T v)
+    {
+        v = default;
+        if (string.IsNullOrWhiteSpace(s)) return false;
+        var target = typeof(T);
+        try
+        {
+            if (target == typeof(int))
+            {
+                if (int.TryParse(s, out var iv)) { v = (T)(object)iv; return true; }
+                return false;
+            }
+            if (target == typeof(float))
+            {
+                if (float.TryParse(s, out var fv)) { v = (T)(object)fv; return true; }
+                return false;
+            }
+            if (target == typeof(double))
+            {
+                if (double.TryParse(s, out var dv)) { v = (T)(object)dv; return true; }
+                return false;
+            }
+            if (target == typeof(long))
+            {
+                if (long.TryParse(s, out var lv)) { v = (T)(object)lv; return true; }
+                return false;
+            }
+            if (target == typeof(bool))
+            {
+                if (bool.TryParse(s, out var bv)) { v = (T)(object)bv; return true; }
+                if (s == "1") { v = (T)(object)true; return true; }
+                if (s == "0") { v = (T)(object)false; return true; }
+                return false;
+            }
+            if (target.IsEnum)
+            {
+                if (Enum.TryParse(target, s, true, out var ev)) { v = (T)ev; return true; }
+                return false;
+            }
+        }
+        catch { return false; }
+        return false;
     }
 }
 }
